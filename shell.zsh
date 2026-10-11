@@ -5,7 +5,7 @@
 # bound at the bottom of this one.
 
 [[ -o zle ]] || return 0
-autoload -Uz add-zsh-hook add-zle-hook-widget vcs_info
+autoload -Uz add-zsh-hook add-zle-hook-widget
 zmodload zsh/datetime
 
 # ---- WezTerm integration ----------------------------------------------------
@@ -15,7 +15,8 @@ zmodload zsh/datetime
 # the ones set below are used.
 WEZTERM_SHELL_SKIP_USER_VARS=1
 _wz_integration=/Applications/WezTerm.app/Contents/Resources/wezterm.sh
-[[ -r $_wz_integration ]] && source $_wz_integration
+# Not a second time when ~/.zshrc is sourced again: it would add its hooks twice.
+[[ -r $_wz_integration ]] && (( ! $+functions[__wezterm_semantic_precmd] )) && source $_wz_integration
 
 # What wezterm.lua needs to know about this shell. WEZ_ZLE says whether zsh is
 # waiting at a prompt, so Cmd+A/C/X/Z are sent to the command line and never to
@@ -47,10 +48,6 @@ _wz_state=$HOME/.cache/wezterm-warp
 # branch, then an empty line to type on. Once a command is entered the chips
 # collapse into one dim line, so the scrollback stays compact.
 setopt prompt_subst
-zstyle ':vcs_info:*' enable git
-zstyle ':vcs_info:*' max-exports 2
-zstyle ':vcs_info:git:*' formats '%b' '%R'
-zstyle ':vcs_info:git:*' actionformats '%b|%a' '%R'
 
 # The prompt reads these when it is drawn, so a folder or branch name is only
 # ever shown, never run as code. % is doubled in them for the same reason.
@@ -63,27 +60,57 @@ _wz_link_end=$'%{\e]8;;\e\\%}'
 # $1 = text color, $2 = text
 _wz_chip() { _wz_chips+=$'%F{236}\ue0b6%K{236}%F{'$1$'}%B '$2$' %b%k%F{236}\ue0b4%f ' }
 
-# Counting changed files means running git in whatever folder you are in, and
-# a repository's own settings can tell git to run programs: a file watcher,
-# content filters, hooks, fetches. A folder unpacked from a download must not
-# get to do that from a prompt, so those are all switched off here, and a
-# repository that defines its own filters is not counted at all.
+# The prompt runs git in whatever folder you are in, and a repository's own
+# settings can tell git to run programs: a file watcher, content filters,
+# hooks, or a fetch through a made-up transport. A folder unpacked from a
+# download must not get to do any of that from a prompt. So every git call
+# here goes through _wz_git, which switches those off no matter what the
+# repository says, and stays quiet; callers go by its exit status.
 _wz_git() {
   GIT_OPTIONAL_LOCKS=0 GIT_NO_LAZY_FETCH=1 GIT_TERMINAL_PROMPT=0 command git \
-    -c core.fsmonitor=false -c core.hooksPath=/dev/null "$@" 2>/dev/null
+    -c core.fsmonitor=false -c core.hooksPath=/dev/null -c credential.helper= \
+    -c protocol.allow=never -c protocol.ext.allow=never -c protocol.file.allow=never \
+    -c protocol.git.allow=never -c protocol.ssh.allow=never \
+    -c protocol.http.allow=never -c protocol.https.allow=never "$@" 2>/dev/null
 }
 
-# Count changed files, but give up on a repository where that is slow.
+# The branch (or the commit, when no branch is checked out) and the top folder
+# of the repository; fails outside one.
+_wz_git_info() {
+  _wz_branch=
+  _wz_root=$(_wz_git rev-parse --show-toplevel) && [[ -n $_wz_root ]] || { _wz_root=; return 1 }
+  _wz_branch=$(_wz_git symbolic-ref --short -q HEAD) || _wz_branch=$(_wz_git rev-parse --short HEAD) || _wz_branch=
+}
+
+# Content filters are the one program-running setting that cannot simply be
+# switched off, because your own (git-lfs, say) have to keep working. They
+# are only trusted when every one of them comes from your own or the system's
+# git settings. Anything else, including not being able to tell, means no.
+_wz_filters_are_yours() {
+  local filters line
+  filters=$(_wz_git config --show-scope --get-regexp '^filter\.')
+  case $? in
+    (1) return 0 ;;  # there are none
+    (0) ;;
+    (*) return 1 ;;  # git could not say
+  esac
+  for line in ${(f)filters}; do
+    [[ $line == (global|system)$'\t'* ]] || return 1
+  done
+}
+
+# Count changed files, unless the repository is slow or not to be trusted
+# with it. No count is shown then; the branch still is.
 typeset -gA _wz_slow_repos
 _wz_count_changes() {
-  local root=$vcs_info_msg_1_
-  (( $+_wz_slow_repos[$root] )) && return 1
+  (( $+_wz_slow_repos[$_wz_root] )) && return 1
   local -F started=$EPOCHREALTIME
-  local own_filters=$'\n'$(_wz_git config --show-scope --get-regexp '^filter\.')
-  [[ $own_filters == *$'\n'(local|worktree)$'\t'* ]] && return 1
-  local -a changed=( ${(f)"$(_wz_git status --porcelain --ignore-submodules=all --no-renames)"} )
+  _wz_filters_are_yours || return 1
+  local listing
+  listing=$(_wz_git status --porcelain --ignore-submodules=all --no-renames) || return 1
+  local -a changed=( ${(f)listing} )
   _wz_p_changes=$#changed
-  (( EPOCHREALTIME - started > 0.2 )) && _wz_slow_repos[$root]=1
+  (( EPOCHREALTIME - started > 0.2 )) && _wz_slow_repos[$_wz_root]=1
   return 0
 }
 
@@ -112,10 +139,10 @@ _wz_took() {
 
 _wz_prompt_precmd() {
   _wz_took
-  vcs_info
+  _wz_git_info
   _wz_p_env=${${CONDA_DEFAULT_ENV:-${VIRTUAL_ENV:t}}//\%/%%}
-  _wz_p_branch=${vcs_info_msg_0_//\%/%%}
-  [[ $vcs_info_msg_0_ == ${_wz_sent_branch-} ]] || _wz_set_var WEZ_BRANCH "${_wz_sent_branch::=$vcs_info_msg_0_}"
+  _wz_p_branch=${_wz_branch//\%/%%}
+  [[ $_wz_branch == ${_wz_sent_branch-} ]] || _wz_set_var WEZ_BRANCH "${_wz_sent_branch::=$_wz_branch}"
 
   # A red mark when the last command failed; 130 is only Ctrl+C.
   _wz_chips=
@@ -288,7 +315,13 @@ _wz_ask() {
 }
 
 _wz_accept-line() {
-  if [[ $CONTEXT == start && $BUFFER == '# '?* ]]; then
+  if [[ $CONTEXT == start && -z ${BUFFER//[[:space:]]} ]]; then
+    # Enter with nothing typed: bring the chips up to date where they are,
+    # instead of leaving an empty block behind as a plain shell would.
+    BUFFER=
+    _wz_prompt_precmd
+    zle .reset-prompt
+  elif [[ $CONTEXT == start && $BUFFER == '# '?* ]]; then
     _wz_ask
   else
     zle .accept-line

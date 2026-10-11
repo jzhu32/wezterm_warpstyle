@@ -139,9 +139,10 @@ used when macOS is in light mode.
 - **The prompt runs git in whatever folder you are in**, to show the branch
   and the count of changed files. A repository can tell git to run programs
   of its own (a file watcher, content filters, hooks), which matters for a
-  folder unpacked from a download. `shell.zsh` switches those off for its own
-  git calls, and skips the count in a repository that defines its own content
-  filters.
+  folder unpacked from a download. Every git call in `shell.zsh` switches
+  those off, including fetches. Content filters are only used when they come
+  from your own git settings; a repository that brings its own gets its branch
+  shown but no count, and so does one whose settings git cannot read.
 - **`# what you want` sends only the words you typed** to Claude, which runs
   in an empty folder without tools. The suggestion is put on the line as
   text; you decide whether to run it.
