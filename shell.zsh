@@ -63,13 +63,25 @@ _wz_link_end=$'%{\e]8;;\e\\%}'
 # $1 = text color, $2 = text
 _wz_chip() { _wz_chips+=$'%F{236}\ue0b6%K{236}%F{'$1$'}%B '$2$' %b%k%F{236}\ue0b4%f ' }
 
+# Counting changed files means running git in whatever folder you are in, and
+# a repository's own settings can tell git to run programs: a file watcher,
+# content filters, hooks, fetches. A folder unpacked from a download must not
+# get to do that from a prompt, so those are all switched off here, and a
+# repository that defines its own filters is not counted at all.
+_wz_git() {
+  GIT_OPTIONAL_LOCKS=0 GIT_NO_LAZY_FETCH=1 GIT_TERMINAL_PROMPT=0 command git \
+    -c core.fsmonitor=false -c core.hooksPath=/dev/null "$@" 2>/dev/null
+}
+
 # Count changed files, but give up on a repository where that is slow.
 typeset -gA _wz_slow_repos
 _wz_count_changes() {
   local root=$vcs_info_msg_1_
   (( $+_wz_slow_repos[$root] )) && return 1
   local -F started=$EPOCHREALTIME
-  local -a changed=( ${(f)"$(GIT_OPTIONAL_LOCKS=0 command git status --porcelain 2>/dev/null)"} )
+  local own_filters=$'\n'$(_wz_git config --show-scope --get-regexp '^filter\.')
+  [[ $own_filters == *$'\n'(local|worktree)$'\t'* ]] && return 1
+  local -a changed=( ${(f)"$(_wz_git status --porcelain --ignore-submodules=all --no-renames)"} )
   _wz_p_changes=$#changed
   (( EPOCHREALTIME - started > 0.2 )) && _wz_slow_repos[$root]=1
   return 0
@@ -247,16 +259,23 @@ zstyle ':completion:*' matcher-list 'm:{a-z}={A-Za-z}'
 # sends it to Claude and puts the suggested command on the line to check and
 # run; nothing is ever run for you. The request goes into history, so Up
 # brings it back.
+#
+# Only the words you typed are sent. Claude runs in an empty folder of its
+# own, without tools, so nothing in the folder you are in (its name, a
+# CLAUDE.md, project settings) can steer the suggestion.
 _wz_ask_prompt="You turn a request into one shell command for zsh on macOS. Reply with the command only, on one line, with no explanation and no code fences. Join several steps with &&. If no shell command can do it, reply with one short line starting with '# '."
 
 _wz_ask() {
   (( $+commands[claude] )) || { zle -M "Claude Code is not installed, so there is nothing to ask."; return 1 }
   local request=${BUFFER#\#} answer
   zle -R "Asking Claude for a command… (Ctrl+C stops)"
-  answer=$(command claude -p --model haiku --tools "" --no-session-persistence --setting-sources "" \
-    --strict-mcp-config --disable-slash-commands --system-prompt $_wz_ask_prompt \
-    "Current folder: $PWD. Request:$request" </dev/null 2>/dev/null)
+  [[ -d $_wz_state/ask ]] || mkdir -m 700 -p $_wz_state/ask
+  answer=$(cd -q $_wz_state/ask && command claude -p --model haiku --tools "" --no-session-persistence \
+    --setting-sources "" --strict-mcp-config --disable-slash-commands --system-prompt $_wz_ask_prompt \
+    "Request:$request" </dev/null 2>/dev/null)
   answer=${${answer#\`\`\`*$'\n'}%$'\n'\`\`\`}
+  # It is text to read before running: no invisible or control characters.
+  answer=${answer//[^[:print:]$'\n']/}
   if [[ -z ${answer//[[:space:]]} ]]; then
     zle -M "No suggestion came back. Is Claude Code signed in?"
     return 1

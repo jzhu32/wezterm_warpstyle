@@ -36,6 +36,7 @@ with open(os.path.join(HOME, "bin", "claude"), "w") as f:
     f.write(r"""#!/bin/sh
 # Stand-in for Claude Code: records how it was called and answers with a fixed command.
 printf '%s\n' "$@" > "$ZDOTDIR/claude-args"
+pwd -P > "$ZDOTDIR/claude-cwd"
 case "$*" in *"nothing useful"*) exit 0;; esac
 printf 'du -sh * | sort -h\n'
 """)
@@ -243,7 +244,8 @@ send("# how big is each folder here\r", 1.2)
 check("a line starting with # asks for a command instead of running", state()[0], "du -sh * | sort -h")
 args = open(os.path.join(HOME, "claude-args")).read()
 check("  ...as a one-off question with no tools", "-p\n" in args and "--tools\n\n" in args and "--no-session-persistence" in args, True)
-check("  ...telling Claude the folder and the request", "Request: how big is each folder here" in args and "Current folder: " in args, True)
+check("  ...sending only the words typed, never the folder", "Request: how big is each folder here" in args and HOME not in args and "folder:" not in args, True)
+check("  ...and running Claude in an empty folder of its own", open(os.path.join(HOME, "claude-cwd")).read().strip(), os.path.realpath(os.path.join(REAL_HOME, ".cache/wezterm-warp/ask")))
 reset()
 send(UP)
 check("  ...and Up brings the request back", state()[0], "# how big is each folder here")
@@ -305,6 +307,46 @@ check("folder list: Enter with no match changes nothing", where(), nav + "/gamma
 before = len(out)
 send("cd\r", 0.8)
 check("folder chip is a link the terminal can click", "\x1b]8;;wezwarp:folder\x1b\\" in bytes(out[before:]).decode("utf-8", "replace"), True)
+
+
+# A repository from somewhere else must not get the prompt to run its programs.
+import subprocess
+evil = os.path.realpath(os.path.join(HOME, "evil-repo"))
+os.makedirs(evil)
+git_env = dict(os.environ, HOME=HOME, GIT_CONFIG_NOSYSTEM="1", GIT_AUTHOR_NAME="t", GIT_AUTHOR_EMAIL="t@example.com",
+               GIT_COMMITTER_NAME="t", GIT_COMMITTER_EMAIL="t@example.com")
+def git(*args, **kw):
+    return subprocess.run(["git", "-C", evil] + list(args), env=git_env, capture_output=True, text=True, **kw)
+git("init", "-q", "-b", "main")
+open(os.path.join(evil, "file.txt"), "w").write("one\n")
+git("add", "-A"); git("commit", "-q", "-m", "start")
+open(os.path.join(evil, "file.txt"), "w").write("two\n")
+ran = lambda: sorted(f for f in os.listdir(evil) if f.startswith("RAN-"))
+
+git("config", "core.fsmonitor", "sh -c 'touch RAN-watcher' #")
+git("status")
+check("(this test is real: plain git would run the repository's file watcher)", ran(), ["RAN-watcher"])
+os.remove(os.path.join(evil, "RAN-watcher"))
+before = len(out)
+send("cd '" + evil + "'\r", 1.2); send("true\r", 1.0)
+shown = bytes(out[before:]).decode("utf-8", "replace")
+check("a repository's file watcher is not run by the prompt", ran(), [])
+check("  ...and its changes are still counted", "\u00b1 1" in shown, True)
+
+git("config", "--unset", "core.fsmonitor")
+git("config", "filter.x.clean", "sh -c 'touch RAN-filter; cat'")
+open(os.path.join(evil, ".gitattributes"), "w").write("*.txt filter=x\n")
+open(os.path.join(evil, "file.txt"), "w").write("three\n")
+git("status")
+check("(and plain git would run the repository's content filter)", ran(), ["RAN-filter"])
+os.remove(os.path.join(evil, "RAN-filter"))
+open(os.path.join(evil, "file.txt"), "w").write("four\n")
+before = len(out)
+send("true\r", 1.0)
+shown = bytes(out[before:]).decode("utf-8", "replace")
+check("a repository's content filter is not run by the prompt", ran(), [])
+check("  ...such a repository shows its branch but no change count", "main" in shown and "\u00b1" not in shown, True)
+send("cd\r", 0.6)
 
 send("echo hi\r", 0.6)
 tail = bytes(out)

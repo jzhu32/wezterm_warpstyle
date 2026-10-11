@@ -134,6 +134,18 @@ used when macOS is in light mode.
 - Clicking to place the cursor inside a command. Use the arrow keys.
 - Warp's AI agent and its visual blocks.
 
+## Good to know
+
+- **The prompt runs git in whatever folder you are in**, to show the branch
+  and the count of changed files. A repository can tell git to run programs
+  of its own (a file watcher, content filters, hooks), which matters for a
+  folder unpacked from a download. `shell.zsh` switches those off for its own
+  git calls, and skips the count in a repository that defines its own content
+  filters.
+- **`# what you want` sends only the words you typed** to Claude, which runs
+  in an empty folder without tools. The suggestion is put on the line as
+  text; you decide whether to run it.
+
 ## Taking it off
 
 1. Delete the line near the end of `~/.zshrc` that mentions `wezterm/shell.zsh`.
