@@ -454,6 +454,14 @@ rename.arg.action.run({ active_tab = function() error("should not be asked") end
 check("  ...and Esc leaves the name alone", named, "unchanged")
 check("ctrl+shift+arrows move the tab", key(config, "LeftArrow", "CTRL|SHIFT").arg .. " " .. key(config, "RightArrow", "CTRL|SHIFT").arg, "-1 1")
 
+-- ---- a grid of four ------------------------------------------------------------------
+mux.calls = {}
+local grid = mux_pane("main")
+function grid:get_current_working_dir() return dir(fake_home .. "/proj") end
+key(config, "4", "CMD|OPT").run(window(""), grid)
+check("cmd+option+4 makes four panes in the same folder and stays in the first", table.concat(mux.calls, " | "),
+  "split main -> " .. fake_home .. "/proj | split main -> " .. fake_home .. "/proj | split main+ -> " .. fake_home .. "/proj | focus main")
+
 local passed = 0
 for _, ok in ipairs(results) do passed = passed + (ok and 1 or 0) end
 print(("\n%d/%d passed"):format(passed, #results))

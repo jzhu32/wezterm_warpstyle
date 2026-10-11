@@ -310,61 +310,92 @@ check("folder chip is a link the terminal can click", "\x1b]8;;wezwarp:folder\x1
 
 
 # A repository from somewhere else must not get the prompt to run its programs.
+# Each case first shows that plain git really would run the program, then that
+# the prompt does not.
 import subprocess
 evil = os.path.realpath(os.path.join(HOME, "evil-repo"))
 os.makedirs(evil)
 git_env = dict(os.environ, HOME=HOME, GIT_CONFIG_NOSYSTEM="1", GIT_AUTHOR_NAME="t", GIT_AUTHOR_EMAIL="t@example.com",
                GIT_COMMITTER_NAME="t", GIT_COMMITTER_EMAIL="t@example.com")
-def git(*args, **kw):
-    return subprocess.run(["git", "-C", evil] + list(args), env=git_env, capture_output=True, text=True, **kw)
+def git(*args):
+    return subprocess.run(["git", "-C", evil] + list(args), env=git_env, capture_output=True, text=True)
+ran = lambda: sorted(f for f in os.listdir(evil) if f.startswith("RAN-"))
+def forget():
+    for f in ran(): os.remove(os.path.join(evil, f))
+
+# Same length as what is committed but a different time stamp, so that git has
+# to read the file to know whether it changed. That read is what runs filters.
+stamp = [time.time() + 100]
+def touch_file(text):
+    assert len(text) == 3
+    path = os.path.join(evil, "file.txt")
+    open(path, "w").write(text + "\n")
+    stamp[0] += 10
+    os.utime(path, (stamp[0], stamp[0]))
+
+def prompt_shows():
+    before = len(out)
+    send("true\r", 1.2)
+    return bytes(out[before:]).decode("utf-8", "replace")
+
 git("init", "-q", "-b", "main")
 open(os.path.join(evil, "file.txt"), "w").write("one\n")
 git("add", "-A"); git("commit", "-q", "-m", "start")
-open(os.path.join(evil, "file.txt"), "w").write("two\n")
-ran = lambda: sorted(f for f in os.listdir(evil) if f.startswith("RAN-"))
+send("cd '" + evil + "'\r", 1.2)
 
 git("config", "core.fsmonitor", "sh -c 'touch RAN-watcher' #")
+touch_file("two")
 git("status")
-check("(this test is real: plain git would run the repository's file watcher)", ran(), ["RAN-watcher"])
-os.remove(os.path.join(evil, "RAN-watcher"))
-before = len(out)
-send("cd '" + evil + "'\r", 1.2); send("true\r", 1.0)
-shown = bytes(out[before:]).decode("utf-8", "replace")
+check("(plain git would run the repository's file watcher)", ran(), ["RAN-watcher"])
+forget(); touch_file("thr")
+shown = prompt_shows()
 check("a repository's file watcher is not run by the prompt", ran(), [])
-check("  ...and its changes are still counted", "\u00b1 1" in shown, True)
-
+check("  ...and its changes are still counted", "± 1" in shown, True)
 git("config", "--unset", "core.fsmonitor")
-git("config", "filter.x.clean", "sh -c 'touch RAN-filter; cat'")
-open(os.path.join(evil, ".gitattributes"), "w").write("*.txt filter=x\n")
-open(os.path.join(evil, "file.txt"), "w").write("three\n")
-git("status")
-check("(and plain git would run the repository's content filter)", ran(), ["RAN-filter"])
-os.remove(os.path.join(evil, "RAN-filter"))
-open(os.path.join(evil, "file.txt"), "w").write("four\n")
-before = len(out)
-send("true\r", 1.0)
-shown = bytes(out[before:]).decode("utf-8", "replace")
-check("a repository's content filter is not run by the prompt", ran(), [])
-check("  ...such a repository shows its branch but no change count", "main" in shown and "±" not in shown, True)
 
-# The same filter, hidden in a file the repository's settings pull in.
-git("config", "--unset", "filter.x.clean")
-open(os.path.join(evil, ".git", "extra"), "w").write("[filter \"x\"]\n\tclean = \"sh -c 'touch RAN-hidden-filter; cat'\"\n")
-git("config", "include.path", "extra")
-open(os.path.join(evil, "file.txt"), "w").write("five\n")
-git("status")
-check("(plain git would run a filter hidden in an included file)", ran(), ["RAN-hidden-filter"])
-for f in ran(): os.remove(os.path.join(evil, f))
-open(os.path.join(evil, "file.txt"), "w").write("six\n")
-before = len(out)
-send("true\r", 1.0)
-shown = bytes(out[before:]).decode("utf-8", "replace")
-check("a filter hidden in an included file is not run either", ran() == [] and "±" not in shown, True)
-git("config", "--unset", "include.path")
-open(os.path.join(evil, ".gitattributes"), "w").write("")
+def filter_case(name, expect_file, setup, teardown=lambda: None):
+    setup()
+    touch_file("aaa")
+    git("status")
+    check("(plain git would run " + name + ")", ran(), [expect_file])
+    forget(); touch_file("bbb")
+    shown = prompt_shows()
+    check(name + " is not run by the prompt", ran(), [])
+    check("  ...the changes are still counted, and the branch shown", "± 2" in shown and "main" in shown, True)
+    teardown()
+
+def attributes(text):
+    open(os.path.join(evil, ".gitattributes"), "w").write(text)
+
+filter_case("the repository's content filter", "RAN-filter",
+    lambda: (git("config", "filter.x.clean", "sh -c 'touch RAN-filter; cat'"), attributes("*.txt filter=x\n")),
+    lambda: git("config", "--remove-section", "filter.x"))
+
+def hide():
+    open(os.path.join(evil, ".git", "extra"), "w").write("[filter \"h\"]\n\tclean = \"sh -c 'touch RAN-hidden; cat'\"\n")
+    git("config", "include.path", "extra"); attributes("*.txt filter=h\n")
+filter_case("a filter hidden in an included settings file", "RAN-hidden", hide,
+    lambda: git("config", "--unset", "include.path"))
+
+filter_case("a filter with = and . in its name", "RAN-odd-name",
+    lambda: (git("config", "filter.a=b.c.clean", "sh -c 'touch RAN-odd-name; cat'"), attributes("*.txt filter=a=b.c\n")),
+    lambda: git("config", "--remove-section", "filter.a=b.c"))
+
+filter_case("a long-running filter process", "RAN-process",
+    lambda: (git("config", "filter.p.process", "sh -c 'touch RAN-process'"), attributes("*.txt filter=p\n")),
+    lambda: git("config", "--remove-section", "filter.p"))
+
+if not WITH_ZSHRC:
+    # One from your own git settings, which the repository only has to ask for.
+    def own():
+        with open(os.path.join(HOME, ".gitconfig"), "w") as f:
+            f.write("[filter \"mine\"]\n\tclean = \"sh -c 'touch RAN-own; cat'\"\n\trequired = true\n")
+        attributes("*.txt filter=mine\n")
+    filter_case("your own filter, on the repository's say-so", "RAN-own", own,
+        lambda: os.remove(os.path.join(HOME, ".gitconfig")))
+attributes("")
 
 # A fetch through a made-up transport, triggered by an object that is missing.
-head = git("rev-parse", "HEAD").stdout.strip()
 tree = git("rev-parse", "HEAD^{tree}").stdout.strip()
 git("config", "extensions.partialClone", "origin")
 git("config", "remote.origin.promisor", "true")
@@ -372,18 +403,14 @@ git("config", "remote.origin.url", "ext::sh -c 'touch RAN-fetch' %S")
 os.remove(os.path.join(evil, ".git", "objects", tree[:2], tree[2:]))
 git("status")
 real_fetch = ran() == ["RAN-fetch"]
-for f in ran(): os.remove(os.path.join(evil, f))
-before = len(out)
-send("true\r", 1.2)
-shown = bytes(out[before:]).decode("utf-8", "replace")
+forget()
+shown = prompt_shows()
 check("a repository cannot make the prompt fetch through its own program" + ("" if real_fetch else " (plain git did not either on this version)"), ran(), [])
 check("  ...and the prompt still shows the branch", "main" in shown, True)
 
 # Settings git cannot read at all: no count, nothing run, prompt intact.
 open(os.path.join(evil, ".git", "config"), "a").write("\n[this is not valid\n")
-before = len(out)
-send("true\r", 1.0)
-shown = bytes(out[before:]).decode("utf-8", "replace")
+shown = prompt_shows()
 check("unreadable repository settings mean no count rather than a guess", "±" not in shown and "" in shown and ran() == [], True)
 send("cd\r", 0.6)
 

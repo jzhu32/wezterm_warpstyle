@@ -625,6 +625,16 @@ local rename_tab = act.PromptInputLine({
   end),
 })
 
+-- Cmd+Option+4 turns the pane you are in into a grid of four, each a shell
+-- in the same folder. Cmd+D and Cmd+Shift+D split one at a time.
+local four_panes = wezterm.action_callback(function(_, pane)
+  local cwd = pane_folder(pane)
+  local right = pane:split({ direction = "Right", size = 0.5, cwd = cwd })
+  pane:split({ direction = "Bottom", size = 0.5, cwd = cwd })
+  right:split({ direction = "Bottom", size = 0.5, cwd = cwd })
+  pane:activate()
+end)
+
 -- ---- Links ------------------------------------------------------------------
 
 -- Cmd+click opens web links as usual, and file paths in settings.editor at the
@@ -743,6 +753,7 @@ config.keys = {
   { key = "d", mods = "CMD|SHIFT", action = act.SplitVertical({ domain = "CurrentPaneDomain" }) },
   { key = "w", mods = "CMD", action = act.CloseCurrentPane({ confirm = true }) },
   { key = "Enter", mods = "CMD|SHIFT", action = act.TogglePaneZoomState },
+  { key = "4", mods = "CMD|OPT", action = four_panes },
   { key = "LeftArrow", mods = "CMD|OPT", action = act.ActivatePaneDirection("Left") },
   { key = "RightArrow", mods = "CMD|OPT", action = act.ActivatePaneDirection("Right") },
   { key = "UpArrow", mods = "CMD|OPT", action = act.ActivatePaneDirection("Up") },

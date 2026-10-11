@@ -82,32 +82,68 @@ _wz_git_info() {
   _wz_branch=$(_wz_git symbolic-ref --short -q HEAD) || _wz_branch=$(_wz_git rev-parse --short HEAD) || _wz_branch=
 }
 
-# Content filters are the one program-running setting that cannot simply be
-# switched off, because your own (git-lfs, say) have to keep working. They
-# are only trusted when every one of them comes from your own or the system's
-# git settings. Anything else, including not being able to tell, means no.
-_wz_filters_are_yours() {
-  local filters line
-  filters=$(_wz_git config --show-scope --get-regexp '^filter\.')
-  case $? in
-    (1) return 0 ;;  # there are none
-    (0) ;;
-    (*) return 1 ;;  # git could not say
-  esac
-  for line in ${(f)filters}; do
-    [[ $line == (global|system)$'\t'* ]] || return 1
+# Content filters (git-lfs is the usual one) are programs git runs on files
+# while it looks for changes, and they cannot be switched off with one
+# setting. Whichever settings file defines one, it acts on what the repository
+# says, so the prompt never runs any of them: for its own calls each filter is
+# replaced by "none", and nothing is counted unless git confirms that took.
+# The price: a file that goes through a filter counts as changed when it has
+# only been touched.
+
+# The filter programs in effect, as key/value pairs in the caller's
+# `effective`. $@ is the git to ask. Fails when git cannot say.
+_wz_read_filters() {
+  local listing record
+  listing=$("$@" config -z --get-regexp '^filter\..*\.(clean|process|smudge)$')
+  case $? in (0|1) ;; (*) return 1 ;; esac
+  effective=()
+  for record in ${(0)listing}; do
+    # "key<newline>value"; a later record for the same key is the one in effect.
+    effective+=( "${record%%$'\n'*}" "${record#*$'\n'}" )
   done
 }
 
-# Count changed files, unless the repository is slow or not to be trusted
-# with it. No count is shown then; the branch still is.
+# git with every filter in the caller's `drivers` replaced by "none". It
+# exports variables, so only call it inside $( ).
+_wz_git_unfiltered() {
+  local -i n=0
+  local driver part
+  for driver in $drivers; do
+    for part in clean process smudge; do
+      export "GIT_CONFIG_KEY_$n=filter.$driver.$part" "GIT_CONFIG_VALUE_$n="
+      (( n += 1 ))
+    done
+    export "GIT_CONFIG_KEY_$n=filter.$driver.required" "GIT_CONFIG_VALUE_$n=false"
+    (( n += 1 ))
+  done
+  export GIT_CONFIG_COUNT=$n
+  _wz_git "$@"
+}
+
+# Count changed files, unless the repository is slow or git cannot be kept
+# from running its filters. No count is shown then; the branch still is.
 typeset -gA _wz_slow_repos
 _wz_count_changes() {
   (( $+_wz_slow_repos[$_wz_root] )) && return 1
   local -F started=$EPOCHREALTIME
-  _wz_filters_are_yours || return 1
-  local listing
-  listing=$(_wz_git status --porcelain --ignore-submodules=all --no-renames) || return 1
+  local -A effective
+  local -a drivers
+  local key value listing
+
+  _wz_read_filters _wz_git || return 1
+  for key value in "${(@kv)effective}"; do
+    [[ -n $value ]] && drivers+=( "${${key#filter.}%.*}" )
+  done
+  drivers=( "${(@u)drivers}" )
+  if (( $#drivers )); then
+    (( $#drivers <= 40 )) || return 1
+    _wz_read_filters _wz_git_unfiltered || return 1
+    for key value in "${(@kv)effective}"; do
+      [[ -z $value ]] || return 1
+    done
+  fi
+
+  listing=$(_wz_git_unfiltered status --porcelain --ignore-submodules=all --no-renames) || return 1
   local -a changed=( ${(f)listing} )
   _wz_p_changes=$#changed
   (( EPOCHREALTIME - started > 0.2 )) && _wz_slow_repos[$_wz_root]=1

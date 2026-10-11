@@ -91,6 +91,7 @@ folder is the one place to change things.
 | Cmd+Shift+R | Name the tab yourself. An empty name goes back to the automatic one. |
 | Ctrl+Shift+Left / Right | Move the tab. |
 | Cmd+D, Cmd+Shift+D | Split to the right, split downwards. |
+| Cmd+Option+4 | Turn the pane you are in into a grid of four. |
 | Cmd+Option+arrows | Move between splits. Cmd+Ctrl+arrows resizes them. |
 | Cmd+Shift+Enter | Make one split fill the tab, and back. |
 | Cmd+W | Close the split or tab. |
@@ -140,9 +141,10 @@ used when macOS is in light mode.
   and the count of changed files. A repository can tell git to run programs
   of its own (a file watcher, content filters, hooks), which matters for a
   folder unpacked from a download. Every git call in `shell.zsh` switches
-  those off, including fetches. Content filters are only used when they come
-  from your own git settings; a repository that brings its own gets its branch
-  shown but no count, and so does one whose settings git cannot read.
+  those off, including fetches and all content filters (git-lfs too). A file
+  that goes through a filter therefore counts as changed when it has only
+  been touched. If git cannot confirm the filters are off, or cannot read the
+  repository's settings, the branch is shown without a count.
 - **`# what you want` sends only the words you typed** to Claude, which runs
   in an empty folder without tools. The suggestion is put on the line as
   text; you decide whether to run it.
