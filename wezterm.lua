@@ -37,6 +37,7 @@ local themes = {
     selection = "#2E5D9E",
     chrome = "#121212",
     tab = "#2A2A2A",
+    active = "#3A3A3A", -- the tab in front, lighter than the rest of the bar
     edge = "#2A2A2A",
     hover = "#1C1C1C",
     tint = "#3D2E00",
@@ -53,6 +54,7 @@ local themes = {
     selection = "#0D4759",
     chrome = "#050505",
     tab = "#1F1F1F",
+    active = "#2E2E2E",
     edge = "#1F1F1F",
     hover = "#141414",
     tint = "#3D2E00",
@@ -67,6 +69,7 @@ local themes = {
     selection = "#B3EDFF",
     chrome = "#F0F0F0",
     tab = "#FFFFFF",
+    active = "#FFFFFF",
     edge = "#DDDDDD",
     hover = "#F7F7F7",
     tint = "#FFF1CC",
@@ -92,7 +95,7 @@ for name, t in pairs(themes) do
     brights = t.brights,
     tab_bar = {
       inactive_tab_edge = t.edge,
-      active_tab = { bg_color = t.tab, fg_color = t.fg },
+      active_tab = { bg_color = t.active, fg_color = t.fg },
       inactive_tab = { bg_color = t.chrome, fg_color = t.muted },
       inactive_tab_hover = { bg_color = t.hover, fg_color = t.fg },
       new_tab = { bg_color = t.chrome, fg_color = t.muted },
@@ -134,6 +137,10 @@ config.adjust_window_size_when_changing_font_size = false
 
 -- Tabs sit in the title bar next to the window buttons.
 config.window_decorations = "INTEGRATED_BUTTONS|RESIZE"
+-- Full screen the way the rest of macOS does it: the green button, its own
+-- space, Esc to leave. WezTerm's own full screen keeps the window in place
+-- and quietly takes away its edges, which looks like a window that broke.
+config.native_macos_fullscreen_mode = true
 config.window_frame = {
   font = wezterm.font_with_fallback({ settings.font, "Menlo" }),
   font_size = settings.tab_font_size,
@@ -291,17 +298,15 @@ wezterm.on("format-tab-title", function(tab, tabs, panes, _, _, max_width)
 
   -- The first character sets the color of the whole tab.
   local items = {}
-  if needs_you then
-    add(items, { Background = { Color = theme.tint } }, { Foreground = { Color = theme.fg } })
-  end
   add(items, { Text = "  " }, "ResetAttributes")
   if needs_you then
     add(items, colored(attention_color, dot))
   end
   if tab.is_active then
     add(items, colored(theme.cursor or theme.accent, icon))
-    add(items, { Text = label })
+    add(items, { Attribute = { Intensity = "Bold" } }, { Text = label }, "ResetAttributes")
     add(items, colored(theme.brights[3], branch))
+    wezterm.GLOBAL.active_tab = (shortcut ~= "" and (shortcut .. " ") or "") .. label
     add(items, { Text = gap })
     add(items, colored(theme.muted, shortcut))
   else
@@ -550,6 +555,12 @@ wezterm.on("update-status", function(window)
       { Text = selection.hint .. " · ⌫ deletes · esc cancels   " },
     })
   end
+  if hint == "" and wezterm.GLOBAL.active_tab then
+    hint = wezterm.format({
+      { Foreground = { Color = theme.muted } },
+      { Text = wezterm.GLOBAL.active_tab .. "   " },
+    })
+  end
   window:set_right_status(hint)
 
   local active = window:active_pane()
@@ -624,6 +635,10 @@ local rename_tab = act.PromptInputLine({
     end
   end),
 })
+
+wezterm.on("augment-command-palette", function()
+  return { { brief = "Rename tab", icon = "md_rename_box", action = rename_tab } }
+end)
 
 -- Cmd+Option+4 turns the pane you are in into a grid of four, each a shell
 -- in the same folder. Cmd+D and Cmd+Shift+D split one at a time.
@@ -747,6 +762,9 @@ config.keys = {
   { key = "RightArrow", mods = "OPT|SHIFT", action = act.SendString("\x1b[1;4C") },
   { key = "Backspace", mods = "CMD", action = act.SendString("\x15") },
   { key = "Enter", mods = "SHIFT", action = act.SendString("\x1b\r") },
+  -- WezTerm gives Option+Enter to full screen, which takes away the window's
+  -- edges and buttons until you press it again. It is a new line here instead.
+  { key = "Enter", mods = "OPT", action = act.SendString("\x1b\r") },
 
   -- Panes
   { key = "d", mods = "CMD", action = act.SplitHorizontal({ domain = "CurrentPaneDomain" }) },

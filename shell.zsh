@@ -25,6 +25,11 @@ _wz_integration=/Applications/WezTerm.app/Contents/Resources/wezterm.sh
 _wz_set_var() { printf '\033]1337;SetUserVar=%s=%s\007' $1 "$(print -rn -- $2 | base64)" }
 _wz_at_prompt() {
   printf '\033]1337;SetUserVar=WEZ_ZLE=MQ==\007'  # "1"
+  # A program that quits without tidying up after itself - an ssh session that
+  # drops is the usual one - leaves mouse reporting switched on, and from then
+  # on every mouse move and scroll types its coordinates onto the command line.
+  # Nothing waiting at a prompt wants those, so switch reporting off each time.
+  printf '\033[?1000l\033[?1002l\033[?1003l\033[?1006l\033[?1015l'
   print -rn -- $'\e]0;'${(V)${(%):-%~}}$'\a'
 }
 _wz_in_command() {

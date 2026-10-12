@@ -451,6 +451,10 @@ send("echo hi\r", 0.6)
 tail = bytes(out)
 check("prompt marks emitted (OSC 133)", b"\x1b]133;A" in startup, True)
 check("at-prompt signal emitted", b"SetUserVar=WEZ_ZLE=MQ==" in startup, True)
+# A program that dies without tidying up leaves mouse reporting on, and then
+# every mouse move types its position onto the command line.
+MOUSE = (b"\x1b[?1000l", b"\x1b[?1002l", b"\x1b[?1003l", b"\x1b[?1006l", b"\x1b[?1015l")
+check("mouse reporting is turned off at the prompt", [m for m in MOUSE if m not in startup], [])
 check("in-command signal emitted", b"SetUserVar=WEZ_ZLE=MA==" in tail, True)
 bad = [w for w in (b"command not found", b"no such", b"parse error", b"bad ", b"unknown", b"not an identifier", b"permission denied") if w in startup.lower()]
 check("no errors while loading", bad, [])

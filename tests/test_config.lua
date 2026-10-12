@@ -168,6 +168,7 @@ check("  ...and Warp's cyan cursor", config.color_schemes["Warp Dark"].cursor_bg
 check("Phenomenon gets a visible cursor too", config.color_schemes["Warp Phenomenon"].cursor_bg, "#19AAD8")
 check("cursor is thickened", config.cursor_thickness, "2pt")
 check("tab text matches the terminal text size", config.window_frame.font_size, 16.0)
+check("full screen is the macOS one, with its own space and Esc to leave", config.native_macos_fullscreen_mode, true)
 check("light system picks Warp Light", (load_config("Light")).color_scheme, "Warp Light")
 config, events, spawned = load_config("Dark")
 
@@ -203,6 +204,14 @@ w = window(""); key(config, "UpArrow", "CMD|SHIFT").run(w, pane(nil, { process =
 check("cmd+shift+up inside Claude Code arms select-above", w.sent[1], "ActivateKeyTable:select_above")
 w = window(""); key(config, "DownArrow", "CMD|SHIFT").run(w, pane("1"))
 check("cmd+shift+down at the prompt selects to the end", w.sent[1], "SendString:\27[996~")
+
+-- Option+Enter is WezTerm's own full-screen toggle until this config takes it.
+-- Full screen removes the window's edges and buttons, so the window can no
+-- longer be resized, and the key is far too easy to hit while typing.
+local newline = key(config, "Enter", "OPT")
+check("opt+enter is a new line, not WezTerm's full-screen toggle",
+  newline and (newline.name .. ":" .. tostring(newline.arg)), "SendString:\27\r")
+check("  ...the same one shift+enter sends", (key(config, "Enter", "SHIFT") or {}).arg, "\27\r")
 
 w = window(""); key(config, "z", "CMD").run(w, pane(nil, { process = CLAUDE }))
 check("cmd+z inside Claude Code undoes", w.sent[1], "SendString:\31")
@@ -305,6 +314,31 @@ end
 check("the tab in front is colored: icon, branch, shortcut", colors_of(tab_items(0, true, shell_tab)), "#19AAD8 #D6FCB9 #8E8E8E")
 check("the other tabs are left plain", colors_of(tab_items(0, false, shell_tab)), "")
 
+-- WezTerm drops the whole title and falls back to "3: name" if one item is not
+-- a FormatItem it knows, so check the shape of every one rather than the text.
+local function badly_shaped(items)
+  local allowed = { Text = true, Foreground = true, Background = true, Attribute = true }
+  for _, item in ipairs(items) do
+    if item ~= "ResetAttributes" then
+      if type(item) ~= "table" then return tostring(item) end
+      for k in pairs(item) do
+        if not allowed[k] then return k end
+      end
+    end
+  end
+  return ""
+end
+for _, case in ipairs({ { 0, true, shell_tab }, { 1, false, shell_tab }, { 0, true, claude_tab } }) do
+  check("every tab title item is one WezTerm knows (" .. tostring(case[2]) .. ")",
+    badly_shaped(tab_items(case[1], case[2], case[3])), "")
+end
+local bar = config.color_schemes["Warp Dark"].tab_bar
+check("the tab in front has a lighter background than the bar",
+  bar.active_tab.bg_color ~= bar.inactive_tab.bg_color and bar.active_tab.bg_color, "#2E2E2E")
+tab_items(0, true, shell_tab)
+w = window("", nil); events["update-status"](w)
+check("the status line names the tab you are in", w.status, "⌘1 Swift/Meldrun   ")
+
 -- ---- attention ---------------------------------------------------------------
 local claude_pane = pane("0", { id = 7, title = "✳ Fix the login bug", process = CLAUDE })
 local other_pane = pane("1", { id = 8 })
@@ -314,7 +348,8 @@ check("bell from a tab you are not on marks it", GLOBAL.attention_7, true)
 check("  ...and raises a notification naming it", w.toasts[1], "✳ Fix the login bug needs you")
 local flagged = { pane_id = 7, foreground_process_name = CLAUDE, title = "✳ Fix the login bug", user_vars = { WEZ_ZLE = "0" } }
 check("  ...and its tab gets a dot", squeeze(tab(1, false, flagged)), "  ● ✳ Fix the login bug  ⌘2 ")
-check("  ...and a tint over the whole tab", colors_of(tab_items(1, false, flagged)), "bg #3D2E00 #FFFFFF #FFB000")
+check("  ...and only a dot, so it never outshines the tab you are in", colors_of(tab_items(1, false, flagged)), "#FFB000")
+check("  ...with items WezTerm knows", badly_shaped(tab_items(1, false, flagged)), "")
 check("  ...but not while it is the tab in front", squeeze(tab(1, true, flagged)), "  ✳ Fix the login bug  ⌘2 ")
 w = window("", nil, { active = claude_pane })
 events["update-status"](w)

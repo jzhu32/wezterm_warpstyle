@@ -65,7 +65,7 @@ folder is the one place to change things.
 | Cmd+C, Cmd+X, Cmd+V | Copy, cut, paste. |
 | Cmd+Z, Cmd+Shift+Z | Undo, redo. |
 | Cmd+Backspace | Delete to the start of the line. Repeat to climb through lines. |
-| Shift+Enter | New line without running the command. |
+| Shift+Enter, Option+Enter | New line without running the command. |
 | Drag with the mouse, then Backspace | Deletes that text, if it appears only once in the command. |
 | Triple click | Selects a whole command, or everything a command printed. |
 | Up / Down | Earlier commands that start with what you have typed. |
@@ -88,13 +88,13 @@ folder is the one place to change things.
 | Keys | What happens |
 |---|---|
 | Cmd+T, Cmd+1 to Cmd+9 | New tab, go to a tab. |
-| Cmd+Shift+R | Name the tab yourself. An empty name goes back to the automatic one. |
+| Cmd+Shift+R, or Cmd+P and "Rename tab" | Name the tab yourself. An empty name goes back to the automatic one. |
 | Ctrl+Shift+Left / Right | Move the tab. |
 | Cmd+D, Cmd+Shift+D | Split to the right, split downwards. |
 | Cmd+Option+4 | Turn the pane you are in into a grid of four. |
 | Cmd+Option+arrows | Move between splits. Cmd+Ctrl+arrows resizes them. |
 | Cmd+Shift+Enter | Make one split fill the tab, and back. |
-| Cmd+W | Close the split or tab. |
+| Cmd+W | Close the split you are in. Closing the last split closes the tab. Splits have no close button of their own. |
 
 Tabs share the bar evenly. Each shows its last two folders and git branch
 while the shell is waiting, or the running program's own title. A tab is
