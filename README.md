@@ -11,7 +11,8 @@ inside WezTerm, so every other terminal stays exactly as it was.
 
 ## Set it up on a Mac
 
-You need [Homebrew](https://brew.sh). Then:
+By hand, in any terminal you already have. No agent, no account, nothing to
+answer. You need [Homebrew](https://brew.sh) first; then two lines:
 
 ```sh
 git clone https://github.com/jzhu32/wezterm_warpstyle.git ~/Developer/Tools/WezTerm
@@ -20,8 +21,26 @@ git clone https://github.com/jzhu32/wezterm_warpstyle.git ~/Developer/Tools/WezT
 
 Quit WezTerm and open it again. That is all.
 
-The folder can live anywhere; `~/Developer/Tools/WezTerm` is only where it is
-kept on the first Mac. The installer is safe to run again at any time.
+If the folder is already there, you are updating rather than installing:
+
+```sh
+cd ~/Developer/Tools/WezTerm && git pull && ./install.sh
+```
+
+A few things worth knowing:
+
+- The installer is safe to run again at any time, and only adds what is
+  missing.
+- `./install.sh --no-brew` skips Homebrew, for when WezTerm and the tools are
+  already installed and you only want the config.
+- An open WezTerm picks up `wezterm.lua` the moment it changes. `shell.zsh`
+  applies to new tabs; a tab you already have takes it after
+  `source ~/.config/wezterm/shell.zsh`.
+- The folder can live anywhere; `~/Developer/Tools/WezTerm` is only where it is
+  kept on the first Mac.
+
+If you would rather have Claude Code or Codex do it, there is a prompt for
+that in [Ask an agent instead](#ask-an-agent-instead).
 
 ### What the installer does
 
@@ -51,6 +70,38 @@ folder is the one place to change things.
 - **Get the latest on a Mac:** `git pull` in this folder. An open WezTerm
   picks up `wezterm.lua` straight away; `shell.zsh` applies to new tabs.
 - **Send a change from a Mac:** `git add -A && git commit -m "what changed" && git push`.
+
+## Ask an agent instead
+
+Paste this into Claude Code or Codex on the other Mac. It installs the setup
+if it is not there and updates it if it is, and it is deliberately told not to
+touch your history or push anything:
+
+```text
+Install or update my Warp-style WezTerm config on this Mac.
+
+The repo is https://github.com/jzhu32/wezterm_warpstyle.git and it belongs at
+~/Developer/Tools/WezTerm.
+
+- If that folder already exists, run `git pull --ff-only` in it. If there are
+  local changes, or the pull is not a fast-forward, stop and show me the
+  output: do not stash, reset, rebase, commit or push anything, ever.
+- If it does not exist, clone it there.
+- Then run ./install.sh in that folder. It is safe to re-run. Pass --no-brew
+  only if Homebrew is missing and WezTerm is already installed.
+- Check it worked: `ls -l ~/.config/wezterm` should show wezterm.lua and
+  shell.zsh as links into the repo, and
+  `wezterm --config-file ~/Developer/Tools/WezTerm/wezterm.lua show-keys | grep "Key Table: select_all"`
+  should print a line.
+- Then tell me, in a few lines: which commits the pull brought in
+  (`git log --oneline`), anything the installer said it kept or changed, and
+  that I need to quit WezTerm and open it again, plus run
+  `source ~/.config/wezterm/shell.zsh` in any tab that is already open.
+```
+
+This saves no work over the two lines above; it is only here for when you
+would rather not type them. The agent is doing the same `git pull` and
+`./install.sh`, so read its plan before you let it go.
 
 ## What you get
 
@@ -150,9 +201,9 @@ used when macOS is in light mode.
 WezTerm has no preferences window; this table is the preferences. For a
 see-through background, the two lines to change are:
 
-- `opacity` — how solid the window is. `1.0` lets nothing through, `0.93` is
-  what it ships with, and below about `0.75` text starts to fight the
-  wallpaper.
+- `opacity` — how solid the window is. `1.0` lets nothing through, `0.80` is
+  what it ships with, and much below that the wallpaper starts to fight the
+  text.
 - `blur` — how much the desktop behind it is blurred. `40` is the default and
   `0` turns the blur off, leaving plain transparency.
 
