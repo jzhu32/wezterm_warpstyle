@@ -156,8 +156,9 @@ tinted amber, and you get a notification, when Claude Code finishes or asks
 something while you are elsewhere, or when a command that ran longer than 30
 seconds ends. The tabs you had open come back the next time WezTerm starts.
 
-A new tab or split starts at the top of the window, and the prompt moves down
-as commands print until it reaches the bottom and stays there. Splitting,
+A new tab or split opens with a short list of shortcuts, then its first prompt,
+at the top of the window. The list scrolls away as you work, and the prompt
+moves down as commands print until it reaches the bottom and stays there. Splitting,
 resizing or closing a split leaves each prompt, and the output above it, on
 the rows they were on. A folder name too long for a narrow split is cut short
 from the left instead of running onto a second row.
@@ -194,8 +195,9 @@ other key cancels. Cmd+Z undoes, one step at a time.
 
 The settings worth changing are in the `settings` table at the top of
 `wezterm.lua`: font and size, opacity, theme, cursor thickness, tab width, the
-editor for Cmd+click, the folders Cmd+O searches, and whether tabs are
-reopened. Saving the file applies it immediately.
+editor for Cmd+click, the folders Cmd+O searches, whether tabs are reopened,
+and whether a new tab opens with the list of shortcuts. Saving the file
+applies it immediately.
 
 Three Warp themes are included: Dark, Phenomenon and Light. The light one is
 used when macOS is in light mode.

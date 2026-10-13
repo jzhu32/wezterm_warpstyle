@@ -499,6 +499,21 @@ check("  ...which is still there afterwards", state()[0], "echo half")
 reset()
 resize(ROWS, COLS)
 
+# A new pane opens with a short list of shortcuts, as Warp's does. Once: not
+# when the setup is loaded again, which the marker in the environment prevents.
+NOTE = b"New terminal session"
+def loaded_again(before=""):
+    seen = len(out)
+    send(" " + before + "source '" + os.path.join(REPO, "shell.zsh") + "'\r", 2.0)
+    return bytes(out[seen:]).count(NOTE)
+check("a new pane opens with a short list of shortcuts", (startup.count(NOTE), "⌘".encode() in startup, b"all commands" in startup), (1, True, True))
+check("  ...which loading the setup again does not repeat", loaded_again(), 0)
+check("  ...it is the first shell in a pane that shows it", loaded_again("unset WEZ_WELCOMED; "), 1)
+check("  ...unless wezterm.lua has it switched off", loaded_again("unset WEZ_WELCOMED; WEZ_WELCOME=0; "), 0)
+resize(ROWS, 40)
+check("  ...or the pane is too narrow to show it without wrapping", loaded_again("unset WEZ_WELCOMED; WEZ_WELCOME=1; "), 0)
+resize(ROWS, COLS)
+
 bad = [w for w in (b"command not found", b"no such", b"parse error", b"bad ", b"unknown", b"not an identifier", b"permission denied") if w in startup.lower()]
 check("no errors while loading", bad, [])
 

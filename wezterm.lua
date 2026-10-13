@@ -23,6 +23,7 @@ local settings = {
   project_folders = { "~/Developer", "~/Worktrees" }, -- where Cmd+O looks for projects
   restore_tabs = true, -- reopen last time's tabs when WezTerm starts
   attention_sound = false, -- also play a sound when a tab needs you
+  welcome = true, -- open a new tab or split with a short list of shortcuts
 }
 
 -- ---- Look -------------------------------------------------------------------
@@ -131,6 +132,8 @@ config.inactive_pane_hsb = { saturation = 0.9, brightness = 0.7 }
 config.initial_cols = 120
 config.initial_rows = 34
 config.scrollback_lines = 20000
+-- shell.zsh reads this to decide whether to print its list of shortcuts.
+config.set_environment_variables = { WEZ_WELCOME = settings.welcome and "1" or "0" }
 config.audible_bell = "Disabled"
 -- Cmd+Plus/Minus changes the text size, not the size of the window.
 config.adjust_window_size_when_changing_font_size = false

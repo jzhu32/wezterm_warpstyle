@@ -169,6 +169,7 @@ check("Phenomenon gets a visible cursor too", config.color_schemes["Warp Phenome
 check("cursor is thickened", config.cursor_thickness, "2pt")
 check("tab text matches the terminal text size", config.window_frame.font_size, 16.0)
 check("full screen is the macOS one, with its own space and Esc to leave", config.native_macos_fullscreen_mode, true)
+check("new shells are told to show their list of shortcuts", config.set_environment_variables.WEZ_WELCOME, "1")
 check("light system picks Warp Light", (load_config("Light")).color_scheme, "Warp Light")
 config, events, spawned = load_config("Dark")
 
