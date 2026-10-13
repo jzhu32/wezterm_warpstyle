@@ -24,6 +24,7 @@ local settings = {
   restore_tabs = true, -- reopen last time's tabs when WezTerm starts
   attention_sound = false, -- also play a sound when a tab needs you
   welcome = true, -- open a new tab or split with a short list of shortcuts
+  scroll_bar = false, -- a bar on the right edge showing how far back you have scrolled
 }
 
 -- ---- Look -------------------------------------------------------------------
@@ -128,6 +129,12 @@ config.cursor_blink_rate = 600
 config.cursor_blink_ease_in = "Constant"
 config.cursor_blink_ease_out = "Constant"
 config.window_padding = { left = "2cell", right = "2cell", top = "0.5cell", bottom = "0.5cell" }
+-- WezTerm draws its scroll bar as wide as the right margin, and from top to
+-- bottom while there is nothing to scroll: one cell is as slim as it gets.
+config.enable_scroll_bar = settings.scroll_bar
+if settings.scroll_bar then
+  config.window_padding.right = "1cell"
+end
 config.inactive_pane_hsb = { saturation = 0.9, brightness = 0.7 }
 config.initial_cols = 120
 config.initial_rows = 34
@@ -790,6 +797,10 @@ config.keys = {
   { key = "p", mods = "CMD|SHIFT", action = act.ActivateCommandPalette },
   { key = "UpArrow", mods = "CMD", action = act.ScrollToPrompt(-1) },
   { key = "DownArrow", mods = "CMD", action = act.ScrollToPrompt(1) },
+  -- Back to the prompt after scrolling up to read, without typing anything.
+  -- On a laptop End and Home are Fn+Right and Fn+Left.
+  { key = "End", mods = "CMD", action = act.ScrollToBottom },
+  { key = "Home", mods = "CMD", action = act.ScrollToTop },
   { key = "c", mods = "CMD|SHIFT", action = copy_last_output },
   {
     key = "k",

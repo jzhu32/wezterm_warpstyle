@@ -168,6 +168,7 @@ from the left instead of running onto a second row.
 | Keys | What happens |
 |---|---|
 | Cmd+Up / Down | Jump from one command to the next in the scrollback. |
+| Cmd+End, Cmd+Home | Jump back down to the prompt after scrolling up, or to the very top. On a laptop End and Home are Fn+Right and Fn+Left. |
 | Cmd+Shift+C | Copy what the last command printed. |
 | Cmd+K | Clear the screen. |
 | Cmd+F | Search what is on screen and in the scrollback. Esc closes it. |
@@ -196,8 +197,8 @@ other key cancels. Cmd+Z undoes, one step at a time.
 The settings worth changing are in the `settings` table at the top of
 `wezterm.lua`: font and size, opacity, theme, cursor thickness, tab width, the
 editor for Cmd+click, the folders Cmd+O searches, whether tabs are reopened,
-and whether a new tab opens with the list of shortcuts. Saving the file
-applies it immediately.
+whether a new tab opens with the list of shortcuts, and whether there is a
+scroll bar. Saving the file applies it immediately.
 
 Three Warp themes are included: Dark, Phenomenon and Light. The light one is
 used when macOS is in light mode.
@@ -223,6 +224,9 @@ window change.
 - A close button on a split, or renaming a tab by right-clicking it. WezTerm
   does not hand tab-bar or split clicks to the config, so both live on keys and
   the command palette instead.
+- Keep the line you type in view while you scroll back, as Warp does. A
+  terminal pane scrolls as one piece and the prompt is its last lines. Typing
+  anything, or Cmd+End, brings you straight back to it.
 - Clicking to place the cursor inside a command. Use the arrow keys.
 - Warp's AI agent and its visual blocks.
 
