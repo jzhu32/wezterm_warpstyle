@@ -139,8 +139,9 @@ config.inactive_pane_hsb = { saturation = 0.9, brightness = 0.7 }
 config.initial_cols = 120
 config.initial_rows = 34
 config.scrollback_lines = 20000
--- shell.zsh reads this to decide whether to print its list of shortcuts.
-config.set_environment_variables = { WEZ_WELCOME = settings.welcome and "1" or "0" }
+-- shell.zsh reads these: whether to print its list of shortcuts, and the color
+-- behind them, which it draws the small gaps between their chips in.
+config.set_environment_variables = { WEZ_WELCOME = settings.welcome and "1" or "0", WEZ_BG = theme.bg }
 config.audible_bell = "Disabled"
 -- Cmd+Plus/Minus changes the text size, not the size of the window.
 config.adjust_window_size_when_changing_font_size = false

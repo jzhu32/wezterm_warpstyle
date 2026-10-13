@@ -459,7 +459,8 @@ fi
 # started from that one. It is ordinary output, so it scrolls away as you work
 # and Cmd+K removes it. `welcome = false` in wezterm.lua turns it off.
 _wz_welcome() {
-  local keys text
+  local keys text line gap= ungap= hex=${WEZ_BG-}
+  local -i row=0
   local -a notes=(
     '#'     'ask Claude for the command'
     '⌘ O'   'open a project'
@@ -468,10 +469,20 @@ _wz_welcome() {
     '⌘ P'   'all commands'
   )
   print -P '\n %B%F{15}  New terminal session%f%b\n'
+  # A chip fills its row from top to bottom, so chips on neighbouring rows run
+  # into one another. A hairline along the top of each but the first, in the
+  # color of the window behind them, reads as a small gap. It is an overline,
+  # and wezterm.lua says what that color is; without it the chips just touch.
+  if [[ $hex == \#[[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]] ]]; then
+    gap=$'\e[53m\e[58:2::'$(( 16#$hex[2,3] )):$(( 16#$hex[4,5] )):$(( 16#$hex[6,7] ))m ungap=$'\e[55m\e[59m'
+  fi
   # One chip to a shortcut, drawn as the prompt's chips are, with their right
-  # edges in line beside what they do.
+  # edges in line beside what they do. The hairline stops short of the round
+  # ends, where it would show beyond their curve.
   for keys text in $notes; do
-    print -P -- "${(l:6-$#keys:: :):-}"$'%F{236}%K{236}%F{252} '$keys$' %k%F{236}%f  %F{244}'$text'%f'
+    line=
+    (( row++ )) && line=$gap
+    print -P -- "${(l:6-$#keys:: :):-}"$'%F{236}'$line$'%K{236}%F{252} '$keys' '${line:+$ungap}$'%k%F{236}%f  %F{244}'$text'%f'
   done
 }
 
