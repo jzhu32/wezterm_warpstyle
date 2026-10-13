@@ -867,6 +867,14 @@ config.mouse_bindings = {
     mods = "NONE",
     action = act.ExtendSelectionToMouseCursor("SemanticZone"),
   },
+  -- A right click is the "jump to bottom" button. WezTerm cannot draw one over
+  -- the text when you scroll up, so the whole pane is it. Programs that take
+  -- over the mouse keep their own right click.
+  {
+    event = { Down = { streak = 1, button = "Right" } },
+    mods = "NONE",
+    action = act.ScrollToBottom,
+  },
 }
 for _, captured in ipairs({ false, true }) do
   table.insert(config.mouse_bindings, {

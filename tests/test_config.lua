@@ -174,6 +174,12 @@ check("new shells are told to show their list of shortcuts", config.set_environm
 check("  ...and the color of the window behind them", config.set_environment_variables.WEZ_BG, config.color_schemes[config.color_scheme].background)
 check("cmd+end jumps back down to the prompt", key(config, "End", "CMD").name, "ScrollToBottom")
 check("  ...and cmd+home to the very top", key(config, "Home", "CMD").name, "ScrollToTop")
+local right_click = {}
+for _, binding in ipairs(config.mouse_bindings) do
+  if (binding.event.Down or {}).button == "Right" then right_click[#right_click + 1] = binding end
+end
+check("a right click jumps back down to the prompt as well", #right_click .. " " .. right_click[1].action.name .. " " .. right_click[1].mods, "1 ScrollToBottom NONE")
+check("  ...but not in a program that takes over the mouse", right_click[1].mouse_reporting, nil)
 check("no scroll bar unless it is asked for, and the margins stay even", tostring(config.enable_scroll_bar) .. " " .. config.window_padding.right, "false 2cell")
 check("light system picks Warp Light", (load_config("Light")).color_scheme, "Warp Light")
 config, events, spawned = load_config("Dark")

@@ -169,6 +169,7 @@ from the left instead of running onto a second row.
 |---|---|
 | Cmd+Up / Down | Jump from one command to the next in the scrollback. |
 | Cmd+End, Cmd+Home | Jump back down to the prompt after scrolling up, or to the very top. On a laptop End and Home are Fn+Right and Fn+Left. |
+| Right-click | Jump back down to the prompt, like Cmd+End. On a trackpad that is a click with two fingers. Programs that use the mouse themselves keep their own right-click. |
 | Cmd+Shift+C | Copy what the last command printed. |
 | Cmd+K | Clear the screen. |
 | Cmd+F | Search what is on screen and in the scrollback. Esc closes it. |
@@ -226,7 +227,10 @@ window change.
   the command palette instead.
 - Keep the line you type in view while you scroll back, as Warp does. A
   terminal pane scrolls as one piece and the prompt is its last lines. Typing
-  anything, or Cmd+End, brings you straight back to it.
+  anything, Cmd+End or a right-click brings you straight back to it.
+- A "jump to bottom" button that appears when you scroll up. WezTerm cannot
+  draw over a pane, and does not tell the config that a pane is scrolled back.
+  A right-click anywhere in the pane does the same job.
 - Clicking to place the cursor inside a command. Use the arrow keys.
 - Warp's AI agent and its visual blocks.
 
