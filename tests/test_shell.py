@@ -6,7 +6,7 @@
 History, the clipboard and zoxide's data go to a throwaway folder, and a
 stand-in replaces Claude Code, so nothing of yours is touched or spent.
 """
-import os, pty, select, shutil, sys, tempfile, time
+import fcntl, os, pty, select, shutil, struct, sys, tempfile, termios, time
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 WITH_ZSHRC = "--with-zshrc" in sys.argv
@@ -47,8 +47,12 @@ ENV = {
     "WEZTERM_PANE": PANE, "PATH": BREW + "/bin:/usr/bin:/bin:/usr/sbin:/sbin", "HOMEBREW_PREFIX": BREW,
     "LANG": "en_US.UTF-8", "_ZO_DATA_DIR": os.path.join(HOME, "zo"),
 }
+ROWS, COLS = 40, 120
 pid, fd = pty.fork()
 if pid == 0:
+    # The size has to be set on the terminal before zsh starts, or it reads 0
+    # rows and $LINES never gets a useful value.
+    fcntl.ioctl(0, termios.TIOCSWINSZ, struct.pack("HHHH", ROWS, COLS, 0, 0))
     os.chdir(REAL_HOME)
     os.execve("/bin/zsh", ["zsh", "-i"], ENV)
 
@@ -451,11 +455,18 @@ send("echo hi\r", 0.6)
 tail = bytes(out)
 check("prompt marks emitted (OSC 133)", b"\x1b]133;A" in startup, True)
 check("at-prompt signal emitted", b"SetUserVar=WEZ_ZLE=MQ==" in startup, True)
+# Warp puts the line you type at the bottom of the window; a terminal starts at
+# the top, so the first prompt is padded down to match.
+check("the first prompt is pushed to the bottom of the window", b"\r\n" * (ROWS - 4) in startup, True)
 # A program that dies without tidying up leaves mouse reporting on, and then
 # every mouse move types its position onto the command line.
 MOUSE = (b"\x1b[?1000l", b"\x1b[?1002l", b"\x1b[?1003l", b"\x1b[?1006l", b"\x1b[?1015l")
 check("mouse reporting is turned off at the prompt", [m for m in MOUSE if m not in startup], [])
 check("in-command signal emitted", b"SetUserVar=WEZ_ZLE=MA==" in tail, True)
+_seen = len(out)
+send("\x0c", 0.6)   # ctrl+L, which is also what Cmd+K sends
+check("clearing the screen drops the prompt back to the bottom", b"\r\n" * (ROWS - 4) in bytes(out[_seen:]), True)
+
 bad = [w for w in (b"command not found", b"no such", b"parse error", b"bad ", b"unknown", b"not an identifier", b"permission denied") if w in startup.lower()]
 check("no errors while loading", bad, [])
 

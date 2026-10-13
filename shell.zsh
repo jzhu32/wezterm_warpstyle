@@ -434,4 +434,27 @@ if [[ -r $_wz_share/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh ]]; then
   done
 fi
 
+# ---- Start at the bottom ----------------------------------------------------
+
+# Warp keeps the line you type at the bottom of the window. A terminal starts
+# you at the top, so a new shell - and every new split - has its prompt floating
+# in the middle of empty space until enough has scrolled by to fill the screen.
+# Padding the screen down once puts the first prompt where Warp's is. The blank
+# lines are on screen only: nothing has scrolled off yet, so scrollback is empty.
+_wz_to_bottom() {
+  local -i pad=$(( LINES - 2 ))
+  (( pad > 0 )) && printf '\n%.0s' {1..$pad}
+}
+
+# Clearing the screen puts the prompt back at the top, so drop it down again.
+# Cmd+K sends Ctrl+L, so it goes through here too.
+_wz_clear_to_bottom() {
+  printf '\e[H\e[2J\e[3J'
+  _wz_to_bottom
+  zle .reset-prompt
+}
+zle -N clear-screen _wz_clear_to_bottom
+
+[[ -o interactive ]] && _wz_to_bottom
+
 unset _wz_seq _wz_widget _wz_style _wz_integration _wz_share

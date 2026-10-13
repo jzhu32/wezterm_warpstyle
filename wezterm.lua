@@ -306,7 +306,6 @@ wezterm.on("format-tab-title", function(tab, tabs, panes, _, _, max_width)
     add(items, colored(theme.cursor or theme.accent, icon))
     add(items, { Attribute = { Intensity = "Bold" } }, { Text = label }, "ResetAttributes")
     add(items, colored(theme.brights[3], branch))
-    wezterm.GLOBAL.active_tab = (shortcut ~= "" and (shortcut .. " ") or "") .. label
     add(items, { Text = gap })
     add(items, colored(theme.muted, shortcut))
   else
@@ -555,12 +554,6 @@ wezterm.on("update-status", function(window)
       { Text = selection.hint .. " · ⌫ deletes · esc cancels   " },
     })
   end
-  if hint == "" and wezterm.GLOBAL.active_tab then
-    hint = wezterm.format({
-      { Foreground = { Color = theme.muted } },
-      { Text = wezterm.GLOBAL.active_tab .. "   " },
-    })
-  end
   window:set_right_status(hint)
 
   local active = window:active_pane()
@@ -637,7 +630,11 @@ local rename_tab = act.PromptInputLine({
 })
 
 wezterm.on("augment-command-palette", function()
-  return { { brief = "Rename tab", icon = "md_rename_box", action = rename_tab } }
+  return {
+    { brief = "Rename tab", icon = "md_rename_box", action = rename_tab },
+    { brief = "Close this split", icon = "md_close_box_outline",
+      action = act.CloseCurrentPane({ confirm = true }) },
+  }
 end)
 
 -- Cmd+Option+4 turns the pane you are in into a grid of four, each a shell

@@ -337,7 +337,7 @@ check("the tab in front has a lighter background than the bar",
   bar.active_tab.bg_color ~= bar.inactive_tab.bg_color and bar.active_tab.bg_color, "#2E2E2E")
 tab_items(0, true, shell_tab)
 w = window("", nil); events["update-status"](w)
-check("the status line names the tab you are in", w.status, "⌘1 Swift/Meldrun   ")
+check("nothing is written beside the tabs, which read as a half-drawn tab", w.status, "")
 
 -- ---- attention ---------------------------------------------------------------
 local claude_pane = pane("0", { id = 7, title = "✳ Fix the login bug", process = CLAUDE })

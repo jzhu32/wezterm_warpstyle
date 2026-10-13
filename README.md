@@ -94,7 +94,7 @@ folder is the one place to change things.
 | Cmd+Option+4 | Turn the pane you are in into a grid of four. |
 | Cmd+Option+arrows | Move between splits. Cmd+Ctrl+arrows resizes them. |
 | Cmd+Shift+Enter | Make one split fill the tab, and back. |
-| Cmd+W | Close the split you are in. Closing the last split closes the tab. Splits have no close button of their own. |
+| Cmd+W, or Cmd+P and "Close this split" | Close the split you are in. Closing the last split closes the tab. Splits have no close button of their own: WezTerm draws none, and the config cannot add one. |
 
 Tabs share the bar evenly. Each shows its last two folders and git branch
 while the shell is waiting, or the running program's own title. A tab is
@@ -102,13 +102,17 @@ tinted amber, and you get a notification, when Claude Code finishes or asks
 something while you are elsewhere, or when a command that ran longer than 30
 seconds ends. The tabs you had open come back the next time WezTerm starts.
 
+A new shell starts with its prompt at the bottom of the window rather than the
+top, the way Warp's does, so a fresh tab or split looks like a full one. The
+blank lines above it are on screen only and nothing is added to the scrollback.
+
 ### Commands and their output
 
 | Keys | What happens |
 |---|---|
 | Cmd+Up / Down | Jump from one command to the next in the scrollback. |
 | Cmd+Shift+C | Copy what the last command printed. |
-| Cmd+K | Clear the screen. |
+| Cmd+K | Clear the screen. The prompt drops back to the bottom afterwards. |
 | Cmd+P | Command palette. |
 | Cmd+, | Open `wezterm.lua`. |
 
@@ -132,6 +136,9 @@ used when macOS is in light mode.
 ## What it cannot do
 
 - Tabs down the side. WezTerm only draws them along the top.
+- A close button on a split, or renaming a tab by right-clicking it. WezTerm
+  does not hand tab-bar or split clicks to the config, so both live on keys and
+  the command palette instead.
 - Clicking to place the cursor inside a command. Use the arrow keys.
 - Warp's AI agent and its visual blocks.
 
