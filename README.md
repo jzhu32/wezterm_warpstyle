@@ -58,6 +58,7 @@ folder is the one place to change things.
 
 | Keys | What happens |
 |---|---|
+| Option+Left / Right, Cmd+Left / Right | Move by word; move to the line's start or end. |
 | Shift+arrows | Select text. Add Option to go by word, Cmd to go to the line's start or end. |
 | Backspace, or just type | Deletes or replaces what is selected. |
 | Cmd+A | Select everything. |
@@ -87,7 +88,9 @@ folder is the one place to change things.
 
 | Keys | What happens |
 |---|---|
-| Cmd+T, Cmd+1 to Cmd+9 | New tab, go to a tab. |
+| Cmd+T | New tab. |
+| Cmd+1 to Cmd+8 | Go to that tab. Cmd+9 goes to the last one, whatever its number. |
+| Cmd+Shift+[ / ], or Ctrl+Tab | The tab before or after this one. |
 | Cmd+Shift+R, or Cmd+P and "Rename tab" | Name the tab yourself. An empty name goes back to the automatic one. |
 | Ctrl+Shift+Left / Right | Move the tab. |
 | Cmd+D, Cmd+Shift+D | Split to the right, split downwards. |
@@ -113,8 +116,19 @@ blank lines above it are on screen only and nothing is added to the scrollback.
 | Cmd+Up / Down | Jump from one command to the next in the scrollback. |
 | Cmd+Shift+C | Copy what the last command printed. |
 | Cmd+K | Clear the screen. The prompt drops back to the bottom afterwards. |
+| Cmd+F | Search what is on screen and in the scrollback. Esc closes it. |
 | Cmd+P | Command palette. |
 | Cmd+, | Open `wezterm.lua`. |
+
+### The window
+
+| Keys | What happens |
+|---|---|
+| Cmd+= / Cmd+- / Cmd+0 | Bigger text, smaller, back to the size set in `wezterm.lua`. |
+| Cmd+N | New window. |
+| Cmd+R | Reload `wezterm.lua`. Saving the file does this on its own. |
+| Cmd+H, Cmd+M, Cmd+Q | Hide, minimise, quit. |
+| The green button; Esc to come back | Full screen, in a space of its own. No key does this on purpose: Option+Enter used to, and full screen takes away the window's edges and buttons, which looks exactly like a window that has stopped being resizable. |
 
 ### Inside Claude Code and Codex
 
@@ -133,9 +147,24 @@ reopened. Saving the file applies it immediately.
 Three Warp themes are included: Dark, Phenomenon and Light. The light one is
 used when macOS is in light mode.
 
+WezTerm has no preferences window; this table is the preferences. For a
+see-through background, the two lines to change are:
+
+- `opacity` — how solid the window is. `1.0` lets nothing through, `0.93` is
+  what it ships with, and below about `0.75` text starts to fight the
+  wallpaper.
+- `blur` — how much the desktop behind it is blurred. `40` is the default and
+  `0` turns the blur off, leaving plain transparency.
+
+Both take effect the moment you save, so you can nudge a value and watch the
+window change.
+
 ## What it cannot do
 
 - Tabs down the side. WezTerm only draws them along the top.
+- A settings window. There is no preferences dialog anywhere in WezTerm; the
+  `settings` table in `wezterm.lua` is where every knob lives, and Cmd+, opens
+  it.
 - A close button on a split, or renaming a tab by right-clicking it. WezTerm
   does not hand tab-bar or split clicks to the config, so both live on keys and
   the command palette instead.
