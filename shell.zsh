@@ -459,30 +459,27 @@ fi
 # started from that one. It is ordinary output, so it scrolls away as you work
 # and Cmd+K removes it. `welcome = false` in wezterm.lua turns it off.
 _wz_welcome() {
-  local keys text line key
-  local -i used
-  print -P '\n %B%F{15}  New terminal session%f%b\n'
-  for keys text in \
-      '#'     'ask Claude for the command' \
-      '⌘ O'   'open a project' \
-      '⇧ ⌘ O' 'open it with Claude Code' \
-      '⌘ D'   'split right, ⇧ for down' \
-      '⇧ ⌘ G' 'folders here' \
-      '⌘ P'   'all commands'; do
-    line=' ' used=0
-    # Each key is drawn as the prompt's chips are, four columns with its space.
-    for key in ${=keys}; do
-      line+=$'%F{236}%K{236}%F{252}'$key$'%k%F{236}%f '
-      (( used += 4 ))
-    done
-    print -P -- "$line${(l:13-used:: :):-}%F{244}$text%f"
+  local keys text
+  local -a notes=(
+    '#'     'ask Claude for the command'
+    '⌘ O'   'open a project'
+    '⇧ ⌘ O' 'open it with Claude Code'
+    '⌘ D'   'split right, Shift for down'
+    '⌘ P'   'all commands'
+  )
+  print -P '\n %B%F{15}  New terminal session%f%b'
+  # One chip to a shortcut, drawn as the prompt's chips are, with their right
+  # edges in line. Each has an empty row above it: chips on neighbouring rows
+  # run into one another.
+  for keys text in $notes; do
+    print -P -- $'\n'"${(l:6-$#keys:: :):-}"$'%F{236}%K{236}%F{252} '$keys$' %k%F{236}%f  %F{244}'$text'%f'
   done
 }
 
-# Not in a pane too small to show it without wrapping.
+# Not in a pane too small for it: it would wrap, or leave no room to work in.
 if [[ ${WEZ_WELCOMED-none} != ${WEZTERM_PANE-} ]]; then
   export WEZ_WELCOMED=${WEZTERM_PANE-}
-  [[ ${WEZ_WELCOME-1} != 0 ]] && (( COLUMNS >= 44 && LINES >= 18 )) && _wz_welcome
+  [[ ${WEZ_WELCOME-1} != 0 ]] && (( COLUMNS >= 44 && LINES >= 28 )) && _wz_welcome
 fi
 
 # ---- Changes of size ---------------------------------------------------------

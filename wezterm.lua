@@ -607,7 +607,11 @@ local function open_project(with_claude)
         if not dir then
           return
         end
-        local _, new_pane = picked_window:mux_window():spawn_tab({ cwd = dir })
+        -- The pane Claude Code starts in has no use for the list of shortcuts.
+        local _, new_pane = picked_window:mux_window():spawn_tab({
+          cwd = dir,
+          set_environment_variables = with_claude and { WEZ_WELCOME = "0" } or nil,
+        })
         if with_claude then
           picked_window:perform_action(act.SendString("claude\r"), new_pane)
           new_pane:split({ direction = "Right", size = 0.4, cwd = dir })

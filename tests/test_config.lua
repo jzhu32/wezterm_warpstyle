@@ -72,7 +72,8 @@ local function mux_window_stub()
   local w = { count = 1 }
   function w:spawn_tab(opts)
     self.count = self.count + 1
-    mux.calls[#mux.calls + 1] = "tab " .. opts.cwd
+    local env = opts.set_environment_variables
+    mux.calls[#mux.calls + 1] = "tab " .. opts.cwd .. (env and " WEZ_WELCOME=" .. env.WEZ_WELCOME or "")
     return mux_tab("tab" .. self.count), mux_pane("pane" .. self.count), self
   end
   return w
@@ -422,7 +423,7 @@ w = window("", nil, { mux_window = mux_window_stub() })
 picker.action.run(w, nil, fake_home .. "/Worktrees/Meldrun/path3")
 check("cmd+shift+o opens the folder, starts Claude Code, adds a shell beside it",
   table.concat(mux.calls, " | ") .. " | " .. tostring(w.sent[1]),
-  "tab " .. fake_home .. "/Worktrees/Meldrun/path3 | split pane2 -> " .. fake_home .. "/Worktrees/Meldrun/path3 | focus pane2 | SendString:claude\r")
+  "tab " .. fake_home .. "/Worktrees/Meldrun/path3 WEZ_WELCOME=0 | split pane2 -> " .. fake_home .. "/Worktrees/Meldrun/path3 | focus pane2 | SendString:claude\r")
 mux.calls = {}
 picker.action.run(w, nil, nil)
 check("  ...and escaping the picker opens nothing", #mux.calls, 0)
