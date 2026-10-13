@@ -101,8 +101,8 @@ def place(s):
 
 # A prompt is an empty row, the rule, the chips, an empty row, the line you type.
 # TOP is one on an empty screen; FRESH is the first one in a new pane, under
-# the twelve rows of shortcuts it opens with.
-TOP, FRESH = (2, 4), (14, 16)
+# the eight rows of shortcuts it opens with.
+TOP, FRESH = (2, 4), (10, 12)
 NOTE = "New terminal session"
 def bottom(s): return (s.rows - 3, s.rows - 1)
 def whole(s):
@@ -148,9 +148,9 @@ if main is None:
 # ---- A new shell ---------------------------------------------------------------
 
 s = settled(main, at_prompt)
-check("a new shell opens with its list of shortcuts at the top of the window", (where(s, NOTE), where(s, "all commands")), ([1], [11]))
-check("  ...each shortcut with an empty row above it, so that no two chips touch", [i for i in range(12) if s.screen[i].strip()], [1, 3, 5, 7, 9, 11])
-check("  ...and the chips all end in the same column, beside what they do", sorted({line.index("\ue0b4") for line in s.screen[3:12:2]}), [9])
+check("a new shell opens with its list of shortcuts at the top of the window", (where(s, NOTE), where(s, "all commands")), ([1], [7]))
+check("  ...a title, an empty row, then one shortcut to a row", [i for i in range(8) if s.screen[i].strip()], [1, 3, 4, 5, 6, 7])
+check("  ...and the chips all end in the same column, beside what they do", sorted({line.index("\ue0b4") for line in s.screen[3:8]}), [9])
 check("  ...the first prompt under it, after an empty row", (place(s), s.screen[chips(s) - 2].strip()), (FRESH, ""))
 check("  ...and nothing above the screen", len(s.above), 0)
 check("the rule is a row of spaces, which WezTerm does not wrap", s.screen[chips(s) - 1].strip(), "")
@@ -199,7 +199,12 @@ below = split(main, "bottom")
 b = settled(below, at_prompt)
 s = settled(main, sized(rows=ROWS - b.rows - 1))
 check("splitting downwards leaves the first pane's prompt whole, right under its output", (whole(s), where(s, "first-output")[-1]), (True, chips(s) - 3))
-check("  ...and a pane that short opens without the shortcuts", (b.rows < 28, where(b, NOTE), place(b), len(b.above)), (True, [], TOP, 0))
+check("  ...and the new pane, half the height, still has room for the shortcuts", (place(b), len(b.above)), (FRESH, 0))
+short = int(cli("split-pane", "--pane-id", below, "--bottom", "--cells", 9).strip())
+t = settled(short, at_prompt)
+check("  ...but a pane too short for them opens without", (t.rows, where(t, NOTE), place(t)), (9, [], TOP))
+close(short)
+settled(below, sized(rows=b.rows))
 s = run(main, "echo second-output", "second-output")
 close(below)
 s = settled(main, sized(rows=ROWS))

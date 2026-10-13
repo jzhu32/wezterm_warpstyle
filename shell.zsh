@@ -467,19 +467,18 @@ _wz_welcome() {
     '⌘ D'   'split right, Shift for down'
     '⌘ P'   'all commands'
   )
-  print -P '\n %B%F{15}  New terminal session%f%b'
+  print -P '\n %B%F{15}  New terminal session%f%b\n'
   # One chip to a shortcut, drawn as the prompt's chips are, with their right
-  # edges in line. Each has an empty row above it: chips on neighbouring rows
-  # run into one another.
+  # edges in line beside what they do.
   for keys text in $notes; do
-    print -P -- $'\n'"${(l:6-$#keys:: :):-}"$'%F{236}%K{236}%F{252} '$keys$' %k%F{236}%f  %F{244}'$text'%f'
+    print -P -- "${(l:6-$#keys:: :):-}"$'%F{236}%K{236}%F{252} '$keys$' %k%F{236}%f  %F{244}'$text'%f'
   done
 }
 
 # Not in a pane too small for it: it would wrap, or leave no room to work in.
 if [[ ${WEZ_WELCOMED-none} != ${WEZTERM_PANE-} ]]; then
   export WEZ_WELCOMED=${WEZTERM_PANE-}
-  [[ ${WEZ_WELCOME-1} != 0 ]] && (( COLUMNS >= 44 && LINES >= 28 )) && _wz_welcome
+  [[ ${WEZ_WELCOME-1} != 0 ]] && (( COLUMNS >= 44 && LINES >= 20 )) && _wz_welcome
 fi
 
 # ---- Changes of size ---------------------------------------------------------
