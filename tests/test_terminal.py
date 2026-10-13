@@ -2,13 +2,12 @@
 
     python3 tests/test_terminal.py
 
-shell.zsh keeps the prompt at the bottom of the window, level across splits,
-with nothing above it for the mouse wheel to scroll to. Whether that works is
-decided by what WezTerm does to the text and the cursor when a pane changes
-size, and a stand-in terminal cannot tell you that. So this starts WezTerm's
-own engine without a window (wezterm-mux-server), runs zsh with shell.zsh in
-it, splits and resizes panes the way you would, and reads back what each one
-holds.
+A split or a resize must leave the prompt on the rows it was on, with the
+output above it untouched. Whether it does is decided by what WezTerm does to
+the text and the cursor when a pane changes size, and a stand-in terminal
+cannot tell you that. So this starts WezTerm's own engine without a window
+(wezterm-mux-server), runs zsh with shell.zsh in it, splits and resizes panes
+the way you would, and reads back what each one holds.
 
 It has its own socket, home folder and history, so nothing of yours is touched.
 """
@@ -97,10 +96,15 @@ def where(s, text):
     return [i for i, line in enumerate(s.screen) if text in line]
 
 def place(s):
-    """Where the prompt is, counted up from the last row: (the line you type, the chips)."""
-    return (s.rows - 1 - s.cursor, None if chips(s) is None else s.rows - 1 - chips(s))
+    """The rows the prompt is on: (the chips, the line you type)."""
+    return (chips(s), s.cursor)
 
-BOTTOM = (0, 2)  # the line you type on the last row, the chips two above it
+# A prompt is an empty row, the rule, the chips, an empty row, the line you type.
+TOP = (2, 4)
+def bottom(s): return (s.rows - 3, s.rows - 1)
+def whole(s):
+    """True if the prompt is in one piece: the line you type two rows under the chips, one row of chips."""
+    return chips(s) is not None and s.cursor - chips(s) == 2
 at_prompt = lambda s: chips(s) is not None
 def shows(text): return lambda s: at_prompt(s) and bool(where(s, text))
 def sized(rows=None, cols=None): return lambda s: at_prompt(s) and rows in (None, s.rows) and cols in (None, s.cols)
@@ -141,24 +145,24 @@ if main is None:
 # ---- A new shell ---------------------------------------------------------------
 
 s = settled(main, at_prompt)
-check("a new shell has its prompt on the last rows of the window", place(s), BOTTOM)
-check("  ...and nothing above the screen for the wheel to scroll to", len(s.above), 0)
+check("a new shell starts at the top of the window", place(s), TOP)
+check("  ...with an empty row above the rule, and nothing above the screen", (s.screen[0].strip(), len(s.above)), ("", 0))
 check("the rule is a row of spaces, which WezTerm does not wrap", s.screen[chips(s) - 1].strip(), "")
 
 s = run(main, "echo first-output", "first-output")
-check("after a command the prompt is still on the last rows", place(s), BOTTOM)
-check("  ...its output is right above the prompt", where(s, "first-output")[-1], chips(s) - 3)
-check("  ...and the empty rows it pushed off the top are gone", len(s.above), 0)
+check("after a command the prompt has moved down, under its output", (where(s, "first-output")[-1], whole(s)), (chips(s) - 3, True))
+check("  ...and still nothing is above the screen", len(s.above), 0)
+home = place(s)
 
 # ---- Side by side -------------------------------------------------------------
 
 right = split(main, "right")
 r = settled(right, at_prompt)
-s = settled(main, sized(cols=r.cols and COLS - r.cols - 1))
-check("splitting to the right leaves the first pane's prompt on the last rows", place(s), BOTTOM)
-check("  ...level with the prompt of the new pane beside it", (place(r), r.rows), (BOTTOM, s.rows))
+s = settled(main, sized(cols=COLS - r.cols - 1))
+check("splitting to the right leaves the first pane's prompt on the rows it was on", place(s), home)
 check("  ...with its output still right above it, and only once", (where(s, "first-output")[-1], len(where(s, "first-output"))), (chips(s) - 3, 2))
-check("  ...and nothing above either screen", (len(s.above), len(r.above)), (0, 0))
+check("  ...and the new pane starts at the top", place(r), TOP)
+check("  ...with nothing above either screen", (len(s.above), len(r.above)), (0, 0))
 
 places = []
 for direction, amount in (("Left", 14), ("Right", 30), ("Left", 9), ("Right", 2), ("Left", 9)):
@@ -167,7 +171,7 @@ for direction, amount in (("Left", 14), ("Right", 30), ("Left", 9), ("Right", 2)
     s = settled(main, lambda s: at_prompt(s) and s.cols != before)
     r = settled(right, at_prompt)
     places += [place(s), place(r)]
-check("dragging the divider back and forth never moves either prompt", places, [BOTTOM] * 10)
+check("dragging the divider back and forth never moves either prompt", places, [home, TOP] * 5)
 check("  ...or the output above the first", (where(s, "first-output")[-1], len(where(s, "first-output"))), (chips(s) - 3, 2))
 
 send(main, "echo half-typed")
@@ -175,12 +179,12 @@ settled(main, shows("half-typed"))
 before = look(main).cols
 cli("adjust-pane-size", "--pane-id", main, "--amount", 11, "Left")
 s = settled(main, lambda s: s.cols != before)
-check("with a command half typed, a change of width leaves it on the last row", (s.screen[-1].strip(), place(s)), ("echo half-typed", BOTTOM))
+check("with a command half typed, a change of width leaves it where it is", (s.screen[s.cursor].strip(), place(s)), ("echo half-typed", home))
 send(main, "\x15")
 
 close(right)
 s = settled(main, sized(cols=COLS))
-check("closing the split leaves the prompt on the last rows", place(s), BOTTOM)
+check("closing the split leaves the prompt on the same rows", place(s), home)
 check("  ...with the output still right above it", (where(s, "first-output")[-1], len(where(s, "first-output"))), (chips(s) - 3, 2))
 
 # ---- One above the other ------------------------------------------------------
@@ -188,14 +192,14 @@ check("  ...with the output still right above it", (where(s, "first-output")[-1]
 below = split(main, "bottom")
 b = settled(below, at_prompt)
 s = settled(main, sized(rows=ROWS - b.rows - 1))
-check("splitting downwards leaves both prompts on the last rows of their panes", (place(s), place(b)), (BOTTOM, BOTTOM))
-check("  ...and nothing above either screen", (len(s.above), len(b.above)), (0, 0))
+check("splitting downwards leaves the first pane as it was, and starts the new one at the top", (place(s), place(b)), (home, TOP))
+check("  ...with nothing above either screen", (len(s.above), len(b.above)), (0, 0))
 s = run(main, "echo second-output", "second-output")
+home = place(s)
 close(below)
 s = settled(main, sized(rows=ROWS))
-check("closing the lower pane brings the prompt down to fill the taller one", place(s), BOTTOM)
-check("  ...with both outputs still on the screen", (len(where(s, "first-output")), len(where(s, "second-output"))), (2, 2))
-check("  ...and nothing above it", len(s.above), 0)
+check("closing the lower pane leaves the prompt on the same rows", place(s), home)
+check("  ...with both outputs still on the screen, and nothing above it", (len(where(s, "first-output")), len(where(s, "second-output")), len(s.above)), (2, 2, 0))
 
 # ---- Typing ahead -------------------------------------------------------------
 
@@ -204,59 +208,63 @@ time.sleep(0.3)
 send(main, "echo typed-early\n")
 s = settled(main, lambda s: at_prompt(s) and len(where(s, "typed-early")) >= 3, wait=15)
 check("a command typed while another runs is run afterwards, untouched", where(s, "slow-done")[-1] < where(s, "typed-early")[-1], True)
-check("  ...and leaves nothing on the line", s.screen[-1].strip(), "")
-check("  ...and the terminal's answers never show up as text", [l for l in s.screen if re.search(r"\d+;\d+R", l)], [])
+check("  ...and leaves nothing on the line", s.screen[s.cursor].strip(), "")
 
-# ---- Real output is never thrown away -----------------------------------------
+# ---- A full screen ------------------------------------------------------------
 
 s = run(main, "seq 1 300", "300")
 numbers = [line.strip() for line in s.above + s.screen]
 check("output longer than the screen is all still there to scroll back to", [n for n in range(1, 301) if str(n) not in numbers], [])
-check("  ...with the prompt on the last rows", place(s), BOTTOM)
+check("  ...and the prompt is on the last rows", place(s), bottom(s))
 
 right = split(main, "right")
 r = settled(right, at_prompt)
 s = settled(main, sized(cols=COLS - r.cols - 1))
-check("with a screen full of output, a split still leaves both prompts level", (place(s), place(r)), (BOTTOM, BOTTOM))
-check("  ...and the last line of output right above the prompt", s.screen[chips(s) - 3].strip(), "300")
+check("with a screen full of output, a split leaves the prompt on the last rows", place(s), bottom(s))
+check("  ...and the last line of output right above it", s.screen[chips(s) - 3].strip(), "300")
 close(right)
 s = settled(main, sized(cols=COLS))
 numbers = [line.strip() for line in s.above + s.screen]
-check("  ...and nothing lost when it is closed again", ([n for n in range(1, 301) if str(n) not in numbers], place(s), s.screen[chips(s) - 3].strip()), ([], BOTTOM, "300"))
+check("  ...and nothing is lost when it is closed again", ([n for n in range(1, 301) if str(n) not in numbers], place(s), s.screen[chips(s) - 3].strip()), ([], bottom(s), "300"))
 
 # ---- Clearing -----------------------------------------------------------------
 
 send(main, "clear\n")
 s = settled(main, lambda s: at_prompt(s) and not where(s, "300"))
-check("`clear` leaves the prompt on the last rows", place(s), BOTTOM)
-check("  ...with an empty screen and nothing above it", ([l for l in s.screen[:chips(s) - 1] if l.strip()], len(s.above)), ([], 0))
+check("`clear` starts again at the top", place(s), TOP)
+check("  ...with nothing else on the screen", [l for l in s.screen[:chips(s) - 1] if l.strip()], [])
 
 run(main, "echo to-be-cleared", "to-be-cleared")
 send(main, "\x0c")
 s = settled(main, lambda s: at_prompt(s) and not where(s, "to-be-cleared"))
-check("Ctrl+L, which is what Cmd+K sends, does the same", (place(s), len(s.above)), (BOTTOM, 0))
+check("Ctrl+L, which is what Cmd+K sends, does the same", place(s), TOP)
+right = split(main, "right")
+r = settled(right, at_prompt)
+s = settled(main, sized(cols=COLS - r.cols - 1))
+check("  ...and a split straight afterwards leaves it there", (place(s), place(r)), (TOP, TOP))
+close(right)
+settled(main, sized(cols=COLS))
 
 send(main, "echo one\x1b\recho two\x1b\recho three")
 settled(main, shows("echo three"))
 send(main, "\x1b[A")
 send(main, "\x0c")
-s = settled(main, lambda s: at_prompt(s) and s.cursor == s.rows - 2)
-check("Ctrl+L with three lines typed keeps all three, the last on the last row", [l.strip() for l in s.screen[-3:]], ["echo one", "echo two", "echo three"])
-check("  ...the prompt above them, and nothing above the screen", (s.rows - 1 - chips(s), len(s.above)), (4, 0))
+s = settled(main, lambda s: at_prompt(s) and s.cursor == 5)
+check("Ctrl+L with three lines typed keeps all three under the prompt", ([l.strip() for l in s.screen[4:7]], chips(s), s.cursor), (["echo one", "echo two", "echo three"], 2, 5))
 send(main, "\x03")
-settled(main, lambda s: at_prompt(s) and s.screen[-1].strip() == "")
+settled(main, lambda s: at_prompt(s) and s.screen[s.cursor].strip() == "")
 
 # ---- Shells that do not start on an empty screen ------------------------------
 
 s = run(main, "echo keep-me", "keep-me")
 send(main, "source $ZDOTDIR/.zshrc\n")
-s = settled(main, lambda s: at_prompt(s) and len(where(s, "source")) >= 1 and s.screen[-1].strip() == "")
-check("loading shell.zsh again leaves what is on the screen where it is", (len(where(s, "keep-me")), place(s)), (2, BOTTOM))
+s = settled(main, lambda s: at_prompt(s) and len(where(s, "source")) >= 1 and s.screen[s.cursor].strip() == "")
+check("loading shell.zsh again leaves what is on the screen where it is", (len(where(s, "keep-me")), whole(s)), (2, True))
 send(main, "zsh -i\n")
-s = settled(main, lambda s: at_prompt(s) and len(where(s, "zsh -i")) >= 1 and s.screen[-1].strip() == "")
-check("so does a shell started inside this one", (len(where(s, "keep-me")), place(s)), (2, BOTTOM))
+s = settled(main, lambda s: at_prompt(s) and len(where(s, "zsh -i")) >= 1 and s.screen[s.cursor].strip() == "")
+check("so does a shell started inside this one", (len(where(s, "keep-me")), whole(s)), (2, True))
 send(main, "exit\n")
-settled(main, lambda s: at_prompt(s) and len(where(s, "exit")) >= 1 and s.screen[-1].strip() == "")
+settled(main, lambda s: at_prompt(s) and len(where(s, "exit")) >= 1 and s.screen[s.cursor].strip() == "")
 
 # ---- A folder too long for the pane -------------------------------------------
 
@@ -267,37 +275,34 @@ os.makedirs(deep)
 send(main, "clear\n")
 settled(main, lambda s: at_prompt(s) and not where(s, "keep-me"))
 send(main, "cd " + deep + "\n")
-settled(main, lambda s: at_prompt(s) and bool(where(s, "navigation")) and s.screen[-1].strip() == "")
+settled(main, lambda s: at_prompt(s) and bool(where(s, "navigation")) and s.screen[s.cursor].strip() == "")
 s = run(main, "echo deep-output", "deep-output")
-check("a long folder name still leaves the chips on one row", (place(s), s.screen[chips(s)].rstrip().endswith("navigation \ue0b4")), (BOTTOM, True))
+check("a long folder name still leaves the chips on one row", (whole(s), s.screen[chips(s)].rstrip().endswith("navigation ")), (True, True))
 right = split(main, "right")
 r = settled(right, at_prompt)
 s = settled(main, sized(cols=COLS - r.cols - 1))
-check("  ...in half the width it is cut short instead of wrapping", (place(s), "…" in s.screen[chips(s)], len(s.screen[chips(s)].rstrip()) < s.cols), (BOTTOM, True, True))
-check("  ...in the new pane too, level with the first", place(r), BOTTOM)
+check("  ...in half the width it is cut short instead of wrapping", (whole(s), "…" in s.screen[chips(s)], len(s.screen[chips(s)].rstrip()) < s.cols), (True, True, True))
+check("  ...in the new pane too", (place(r), "…" in r.screen[chips(r)]), (TOP, True))
 check("  ...and the output above is still there, once", len(where(s, "deep-output")), 2)
 close(right)
 s = settled(main, sized(cols=COLS))
-check("  ...and widening again loses nothing", (place(s), len(where(s, "deep-output")), len(s.above)), (BOTTOM, 2, 0))
+check("  ...and widening again loses nothing", (whole(s), len(where(s, "deep-output")), len(s.above)), (True, 2, 0))
 send(main, "cd\n")
-settled(main, lambda s: at_prompt(s) and s.screen[chips(s)].rstrip().endswith("~ \ue0b4") and s.screen[-1].strip() == "")
+settled(main, lambda s: at_prompt(s) and s.screen[chips(s)].rstrip().endswith("~ ") and s.screen[s.cursor].strip() == "")
 
 # ---- Lists drawn under the prompt ---------------------------------------------
 
-# fzf makes room for its list by pushing the screen up. On a screen that is
-# mostly empty, that is undone when the list closes. (On a full one it cannot
-# be: what went off the top is real output, and stays in the scrollback.)
 if os.path.exists(os.path.join(BREW, "bin", "fzf")):
     send(main, "clear\n")
     settled(main, lambda s: at_prompt(s) and not where(s, "deep-output"))
-    run(main, "echo keep-me", "keep-me")
+    s = run(main, "echo keep-me", "keep-me")
+    home = place(s)
     send(main, "\x12")
-    s = settled(main, lambda s: s.cursor < s.rows - 3)
-    check("the history list opens under the prompt, pushing it up", s.cursor < s.rows - 3, True)
+    s = settled(main, lambda s: bool(where(s, "╭")))
+    check("the history list opens under the prompt without moving it", (bool(where(s, "╭")), chips(s)), (True, home[0]))
     send(main, "\x1b")
-    s = settled(main, lambda s: at_prompt(s) and place(s) == BOTTOM)
-    check("  ...and closing it brings the prompt back to the last rows", place(s), BOTTOM)
-    check("  ...with what was on the screen still there, and nothing above it", (len(where(s, "keep-me")), len(s.above)), (2, 0))
+    s = settled(main, lambda s: at_prompt(s) and not where(s, "╭"))
+    check("  ...and closing it leaves everything where it was", (place(s), len(where(s, "keep-me")), len(s.above)), (home, 2, 0))
 else:
     print("Skipped: the history list needs fzf.")
 
