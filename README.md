@@ -156,9 +156,13 @@ tinted amber, and you get a notification, when Claude Code finishes or asks
 something while you are elsewhere, or when a command that ran longer than 30
 seconds ends. The tabs you had open come back the next time WezTerm starts.
 
-A new shell starts with its prompt at the bottom of the window rather than the
-top, the way Warp's does, so a fresh tab or split looks like a full one. The
-blank lines above it are on screen only and nothing is added to the scrollback.
+The prompt sits at the bottom of the window rather than the top, the way
+Warp's does, so a fresh tab or split looks like a full one, and two splits side
+by side stay level when you split, resize or close them. The empty rows above
+it are never something to scroll to: until a command has printed more than
+fits on the screen, the mouse wheel has nothing to move. A folder name too long
+for a narrow split is cut short from the left instead of running onto a second
+row.
 
 ### Commands and their output
 
@@ -219,6 +223,11 @@ window change.
 - A close button on a split, or renaming a tab by right-clicking it. WezTerm
   does not hand tab-bar or split clicks to the config, so both live on keys and
   the command palette instead.
+- Keep the prompt at the bottom while a list is open under it. Ctrl+R, Ctrl+T
+  and the folder list are drawn below the prompt, so they push it up to make
+  room. On a screen that is mostly empty it drops back when the list closes;
+  on a full one it stays where it was pushed until new output fills the space,
+  as in any terminal.
 - Clicking to place the cursor inside a command. Use the arrow keys.
 - Warp's AI agent and its visual blocks.
 
@@ -232,6 +241,12 @@ window change.
   that goes through a filter therefore counts as changed when it has only
   been touched. If git cannot confirm the filters are off, or cannot read the
   repository's settings, the branch is shown without a count.
+- **Keeping the prompt at the bottom means asking WezTerm what the pane
+  holds.** Until real output has scrolled off the top, each new prompt runs
+  `wezterm cli get-text` once, which takes about 15 ms, to learn whether the
+  rows above the screen are empty and can go. Once real output is up there
+  it stops, and nothing you could scroll back to is ever removed. That does
+  leave up to a screenful of empty rows at the very top of a long scrollback.
 - **`# what you want` sends only the words you typed** to Claude, which runs
   in an empty folder without tools. The suggestion is put on the line as
   text; you decide whether to run it.
@@ -249,10 +264,12 @@ window change.
 python3 tests/run.py
 ```
 
-This drives a real zsh through every editing feature and runs the logic in
-`wezterm.lua` against a stand-in for WezTerm. It needs Neovim for the second
-part, only as a Lua interpreter (`brew install neovim`). Your history,
-clipboard and Claude Code are not touched.
+This drives a real zsh through every editing feature, runs the logic in
+`wezterm.lua` against a stand-in for WezTerm, and starts WezTerm's own engine
+with no window to check that the prompt stays at the bottom through splits and
+resizes. It needs Neovim for the `wezterm.lua` part, only as a Lua interpreter
+(`brew install neovim`). Your history, clipboard, open windows and Claude Code
+are not touched.
 
 `wezterm show-keys` exits successfully even when it rejects a config, so to
 check that WezTerm accepts `wezterm.lua`, look for one of its own bindings:

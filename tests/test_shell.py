@@ -41,10 +41,18 @@ case "$*" in *"nothing useful"*) exit 0;; esac
 printf 'du -sh * | sort -h\n'
 """)
 os.chmod(os.path.join(HOME, "bin", "claude"), 0o755)
+with open(os.path.join(HOME, "bin", "wezterm"), "w") as f:
+    f.write(r"""#!/bin/sh
+# Stand-in for `wezterm cli get-text`: says the pane holds whatever a check has
+# put in the file, and fails, as with no WezTerm to ask, when there is none.
+printf '%s\n' "$@" > "$ZDOTDIR/wezterm-args"
+cat "$ZDOTDIR/pane" 2>/dev/null
+""")
+os.chmod(os.path.join(HOME, "bin", "wezterm"), 0o755)
 
 ENV = {
     "HOME": REAL_HOME, "ZDOTDIR": HOME, "TERM": "xterm-256color", "TERM_PROGRAM": "WezTerm",
-    "WEZTERM_PANE": PANE, "PATH": BREW + "/bin:/usr/bin:/bin:/usr/sbin:/sbin", "HOMEBREW_PREFIX": BREW,
+    "WEZTERM_PANE": PANE, "WEZTERM_EXECUTABLE_DIR": os.path.join(HOME, "bin"), "PATH": BREW + "/bin:/usr/bin:/bin:/usr/sbin:/sbin", "HOMEBREW_PREFIX": BREW,
     "LANG": "en_US.UTF-8", "_ZO_DATA_DIR": os.path.join(HOME, "zo"),
 }
 ROWS, COLS = 40, 120
@@ -57,13 +65,22 @@ if pid == 0:
     os.execve("/bin/zsh", ["zsh", "-i"], ENV)
 
 out = bytearray()
+# zsh asks the terminal which row the cursor is on, and this is the terminal.
+# `cursor_row` is the answer; `typed_first` is put in front of one answer, as if
+# those keys had been pressed just as the question was asked.
+cursor_row, typed_first, answered = ROWS, "", 0
 def drain(wait):
+    global answered, typed_first
     end = time.time() + wait
     while time.time() < end:
         r, _, _ = select.select([fd], [], [], 0.05)
         if r:
             try: out.extend(os.read(fd, 65536))
             except OSError: return
+            while (at := out.find(b"\x1b[6n", answered)) >= 0:
+                answered = at + 4
+                os.write(fd, (typed_first + "\x1b[%d;1R" % cursor_row).encode())
+                typed_first = ""
 
 def send(s, wait=0.25):
     os.write(fd, s.encode()); drain(wait)
@@ -94,6 +111,16 @@ def check(name, got, want):
     ok = got == want
     results.append(ok)
     print(("PASS  " if ok else "FAIL  ") + name + ("" if ok else f"\n        got  {got!r}\n        want {want!r}"))
+
+def longest_run(data, what=b"\r\n"):
+    """How many times in a row `what` comes at most."""
+    best = run = at = 0
+    while at < len(data):
+        if data.startswith(what, at):
+            run += 1; at += len(what); best = max(best, run)
+        else:
+            run = 0; at += 1
+    return best
 
 drain(3.0)
 startup = bytes(out)
@@ -447,6 +474,7 @@ send("source '" + os.path.join(REPO, "shell.zsh") + "'\r", 2.0)
 started = prompts()
 send("true\r", 1.0)
 check("sourcing the setup twice still gives one prompt per command", prompts() - started, 1)
+check("  ...and does not push what is on the screen away", longest_run(bytes(out[before:])) < ROWS - 4, True)
 send("echo hello world"); send(SL * 5); send(BS)
 check("  ...and editing still works", state()[0], "echo hello ")
 reset()
@@ -456,8 +484,11 @@ tail = bytes(out)
 check("prompt marks emitted (OSC 133)", b"\x1b]133;A" in startup, True)
 check("at-prompt signal emitted", b"SetUserVar=WEZ_ZLE=MQ==" in startup, True)
 # Warp puts the line you type at the bottom of the window; a terminal starts at
-# the top, so the first prompt is padded down to match.
-check("the first prompt is pushed to the bottom of the window", b"\r\n" * (ROWS - 4) in startup, True)
+# the top, so the first prompt is pushed down. By exactly the rows above it:
+# one more and a row scrolls off the top, for the mouse wheel to find.
+check("the first prompt is pushed down to the last rows, and no further", longest_run(startup), ROWS - 4)
+check("the rule is struck-through spaces, which WezTerm does not wrap", b"\x1b[9m" + b" " * (COLS - 1) + b"\x1b[29m" in startup, True)
+check("  ...not a row of line characters, which it does", "─".encode() in startup, False)
 # A program that dies without tidying up leaves mouse reporting on, and then
 # every mouse move types its position onto the command line.
 MOUSE = (b"\x1b[?1000l", b"\x1b[?1002l", b"\x1b[?1003l", b"\x1b[?1006l", b"\x1b[?1015l")
@@ -465,7 +496,86 @@ check("mouse reporting is turned off at the prompt", [m for m in MOUSE if m not 
 check("in-command signal emitted", b"SetUserVar=WEZ_ZLE=MA==" in tail, True)
 _seen = len(out)
 send("\x0c", 0.6)   # ctrl+L, which is also what Cmd+K sends
-check("clearing the screen drops the prompt back to the bottom", b"\r\n" * (ROWS - 4) in bytes(out[_seen:]), True)
+check("clearing the screen redraws the prompt from the last row up", b"\x1b[H\x1b[2J\x1b[3J\x1b[%d;1H" % ROWS in bytes(out[_seen:]), True)
+_seen = len(out)
+send("clear\r", 1.0)
+check("the `clear` command starts again at the bottom too", longest_run(bytes(out[_seen:])), ROWS - 4)
+
+# ---- Staying at the bottom ------------------------------------------------------
+#
+# While nothing real has scrolled off the top, the shell tidies up at each
+# prompt. It asks the terminal where the cursor is (answered in drain) and asks
+# WezTerm what the pane holds (the stand-in, fed by `holds`). test_terminal.py
+# checks the same things in a real WezTerm; these pin down the decisions.
+RULE, CHIPS = "\x1b[9m" + " " * (COLS - 1), "\ue0b6 \uf413  ~ \ue0b4"
+def holds(above, under=0):
+    """The pane as WezTerm would report it: rows above the screen, then a screen
+    with the prompt and `under` empty rows below the line you type."""
+    global cursor_row
+    screen = [""] * (ROWS - 4 - under) + [RULE, CHIPS, "", ""] + [""] * under
+    cursor_row = ROWS - under
+    with open(os.path.join(HOME, "pane"), "w") as f:
+        f.write("".join(row + "\r\n" for row in above + screen) + "\x1b(B\x1b[0m\n")
+
+def tidied(typed=""):
+    """What the shell sends when it looks at the pane afresh at a new prompt."""
+    global typed_first
+    seen = len(out)
+    typed_first = typed
+    send(" _wz_fresh=1\r", 1.2)
+    return bytes(out[seen:])
+
+SCROLLBACK_GONE, MOVED_DOWN = b"\x1b[3J", b"\x1b7\x1b[H\x1b[%dL\x1b8\x1b[%dB"
+holds(above=["", "   ", ""])
+sent = tidied()
+check("empty rows that have scrolled off the top are thrown away", SCROLLBACK_GONE in sent, True)
+check("  ...and nothing moves when the prompt is already on the last row", b"\x1b7" in sent, False)
+check("  ...WezTerm is asked for this pane, what scrolled off and the screen",
+      open(os.path.join(HOME, "wezterm-args")).read().split(),
+      ["-n", "cli", "--no-auto-start", "get-text", "--escapes", "--pane-id", PANE, "--start-line", "-1000", "--end-line", str(ROWS - 1)])
+
+holds(above=[], under=6)
+sent = tidied()
+check("room under the prompt is closed by moving the whole screen down", MOVED_DOWN % (6, 6) in sent, True)
+check("  ...with nothing above the screen, nothing is thrown away", SCROLLBACK_GONE in sent, False)
+
+holds(above=["", "", ""])
+tidied(typed="echo raced")
+check("keys pressed just as the terminal is asked are kept, in order", state()[0], "echo raced")
+reset()
+
+holds(above=["", "\x1b[41m    \x1b[0m", ""])
+check("a row of nothing but color counts as output and is kept", SCROLLBACK_GONE in tidied(), False)
+holds(above=["", "last line of real output", ""], under=3)
+sent = tidied()
+check("real output that has scrolled off the top is never thrown away", SCROLLBACK_GONE in sent, False)
+check("  ...and the screen is not moved, which would leave a gap in it", b"\x1b7" in sent, False)
+asked, seen = out.count(b"\x1b[6n"), len(out)
+holds(above=[""])
+send("true\r", 1.0)
+check("  ...and from then on the terminal is left alone", (out.count(b"\x1b[6n") - asked, SCROLLBACK_GONE in bytes(out[seen:])), (0, False))
+
+os.remove(os.path.join(HOME, "pane"))
+asked = out.count(b"\x1b[6n")
+tidied(); send("true\r", 1.0)
+check("with no WezTerm to ask, it gives up after one try", out.count(b"\x1b[6n") - asked, 1)
+
+# WezTerm moves a cursor in the first column up a row when the width changes,
+# and zsh then redraws the prompt a row too high. The cure is a second redraw
+# that starts with one cursor-down; this is what that looks like on the wire.
+LOWER = b"\x1b[B\x1b]133;P;k=i\x07"
+def resize(rows, cols):
+    seen = len(out)
+    fcntl.ioctl(fd, termios.TIOCSWINSZ, struct.pack("HHHH", rows, cols, 0, 0))
+    drain(0.8)
+    return bytes(out[seen:])
+check("after a change of width with nothing typed, the prompt is drawn again one row lower", resize(ROWS, COLS - 30).count(LOWER), 1)
+check("  ...a change of height alone does not need it", LOWER in resize(ROWS - 5, COLS - 30), False)
+send("echo half")
+check("  ...nor does a change of width with a command half typed", LOWER in resize(ROWS - 5, COLS), False)
+check("  ...which is still there afterwards", state()[0], "echo half")
+reset()
+resize(ROWS, COLS)
 
 bad = [w for w in (b"command not found", b"no such", b"parse error", b"bad ", b"unknown", b"not an identifier", b"permission denied") if w in startup.lower()]
 check("no errors while loading", bad, [])

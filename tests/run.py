@@ -4,7 +4,8 @@
     python3 tests/run.py --with-zshrc   # shell checks on top of your own ~/.zshrc
 
 Needs WezTerm and the Homebrew tools from the Brewfile. The config checks also
-need Neovim, used only as a Lua interpreter (brew install neovim).
+need Neovim, used only as a Lua interpreter (brew install neovim). The third
+part runs WezTerm's own engine with no window, on a socket of its own.
 """
 import pathlib, shutil, subprocess, sys, tempfile
 
@@ -13,6 +14,9 @@ ok = True
 
 print("== shell.zsh", flush=True)
 ok &= subprocess.call([sys.executable, str(tests / "test_shell.py")] + sys.argv[1:]) == 0
+
+print("\n== shell.zsh in a real WezTerm", flush=True)
+ok &= subprocess.call([sys.executable, str(tests / "test_terminal.py")]) == 0
 
 print("\n== wezterm.lua", flush=True)
 nvim = shutil.which("nvim")

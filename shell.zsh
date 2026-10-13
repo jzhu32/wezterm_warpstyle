@@ -37,6 +37,9 @@ _wz_in_command() {
   printf '\033]1337;SetUserVar=WEZ_ZLE=MA==\007'  # "0"
   local -a typed=( ${(z)1} )
   _wz_set_var WEZ_CMD ${typed[1]:t}
+  # The screen is about to be wiped: start again at the bottom, without the
+  # empty line that otherwise goes between two commands.
+  [[ ${1//[[:space:]]} == (clear|reset) ]] && _wz_cleared=1 _wz_prompts=0
   # The tab shows the command until the program sets a title of its own.
   print -rn -- $'\e]0;'${(V)${1%%$'\n'*}[1,80]}$'\a'
 }
@@ -155,8 +158,14 @@ _wz_count_changes() {
   return 0
 }
 
-# One column short of the window: zsh miscounts a prompt line that is full.
-_wz_rule='%F{238}${(l:COLUMNS-1::─:):-}%f'
+# The rule is a row of struck-through spaces rather than of ─ characters. When a
+# pane gets narrower WezTerm wraps text onto more rows but leaves a row of
+# spaces alone, so a rule made of them stays one row and the prompt keeps its
+# height; made of ─ it folded onto a second row at every split. It goes inside
+# %{ %} so that zsh counts it as taking no room either: zsh assumes anything
+# longer than the window has been wrapped. One column short of the window, as
+# zsh miscounts a prompt line that is full.
+_wz_rule=$'%F{238}%{\e[9m${(l:COLUMNS-1:: :):-}\e[29m%}%f'
 _wz_mark_prompt=$'%{\e]133;P;k=i\a%}'
 _wz_mark_input=$'%{\e]133;B\a%}'
 _wz_prompt_compact=$_wz_mark_prompt$_wz_rule$'\n''%F{244}${_wz_p_env:+$_wz_p_env }%~${_wz_p_branch:+ git:($_wz_p_branch)}%f'$'\n'$_wz_mark_input
@@ -191,12 +200,20 @@ _wz_prompt_precmd() {
   local failed=$_wz_chips
   _wz_chips=
   [[ -n $_wz_p_env ]] && _wz_chip 15 $'\uf489  ${_wz_p_env}'
-  _wz_chip 15 $_wz_link_folder$'\uf413  %~'$_wz_link_end
+  # The folder is the chip that gives way when they do not all fit: it keeps
+  # its end, which is where you are. $_wz_p_rest is the room the others need.
+  _wz_chip 15 $_wz_link_folder$'\uf413  %(l.%$(( COLUMNS - _wz_p_rest > 12 ? COLUMNS - _wz_p_rest : 12 ))<…<%~%<<.)'$_wz_link_end
   if [[ -n $_wz_p_branch ]]; then
     _wz_chip 10 $'\uf418  ${_wz_p_branch}'
     _wz_count_changes && _wz_chip 250 '± ${_wz_p_changes}'
   fi
-  PROMPT=$_wz_mark_prompt$_wz_rule$'\n''%(130?..%(?..'$failed'))'$_wz_chips'%F{244}${_wz_p_took:+took $_wz_p_took}%f'$'\n\n'$_wz_mark_input
+  # 8 columns go around each chip's text, and the red mark may yet join them.
+  _wz_p_rest=$(( 20 + ${#_wz_p_took} + (${#_wz_p_env} ? ${#_wz_p_env} + 8 : 0)
+    + (${#_wz_p_branch} ? ${#_wz_p_branch} + ${#_wz_p_changes} + 16 : 0) ))
+  # The chips never run onto a second row: whatever still does not fit is cut
+  # off. A prompt that changed height with the width of the window would be
+  # redrawn in the wrong place by zsh, which has no idea the terminal rewraps.
+  PROMPT=$_wz_mark_prompt$_wz_rule$'\n''%-2>…>%(130?..%(?..'$failed'))'$_wz_chips'%F{244}${_wz_p_took:+took $_wz_p_took}%f%<<%b%k%f'$_wz_link_end$'\n\n'$_wz_mark_input
 }
 
 # Blank line between commands, like the spacing between Warp's blocks.
@@ -401,7 +418,7 @@ _wz_pick-folder() {
       --header='enter: go there · tab: look inside · esc: close' \
       --bind='enter:print(go)+accept,tab:print(look)+accept')
     # Esc, or Enter with nothing matching
-    [[ $picked == *$'\n'* ]] || { zle reset-prompt; return 0 }
+    [[ $picked == *$'\n'* ]] || { zle reset-prompt; _wz_later; return 0 }
     name=${${picked#*$'\n'}%%$'\t'*}
     if [[ $name == .. ]]; then dir=${dir:h}; else dir=${dir%/}/$name; fi
     [[ $picked == go$'\n'* ]] && break
@@ -434,27 +451,200 @@ if [[ -r $_wz_share/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh ]]; then
   done
 fi
 
-# ---- Start at the bottom ----------------------------------------------------
+# ---- Stay at the bottom -----------------------------------------------------
 
 # Warp keeps the line you type at the bottom of the window. A terminal starts
-# you at the top, so a new shell - and every new split - has its prompt floating
-# in the middle of empty space until enough has scrolled by to fill the screen.
-# Padding the screen down once puts the first prompt where Warp's is. The blank
-# lines are on screen only: nothing has scrolled off yet, so scrollback is empty.
+# you at the top, so a new shell - and every new split - would have its prompt
+# floating in empty space until enough had scrolled by to fill the screen.
+# Starting at the bottom instead brings two jobs with it: the empty rows above
+# the prompt must never be something the mouse wheel can scroll to, and a
+# change of size must not leave the prompt stranded or out of line with the
+# split beside it.
+
+# Rows the prompt takes: the rule, the chips, an empty row, the line you type.
+_wz_prompt_rows=4
+
+# For a screen that is empty with the cursor at the top: a new shell, or one
+# that `clear` has just wiped. The prompt then fills the last rows exactly, so
+# nothing is pushed off the top.
 _wz_to_bottom() {
-  local -i pad=$(( LINES - 2 ))
+  local -i pad=$(( LINES - _wz_prompt_rows ))
   (( pad > 0 )) && printf '\n%.0s' {1..$pad}
 }
 
-# Clearing the screen puts the prompt back at the top, so drop it down again.
-# Cmd+K sends Ctrl+L, so it goes through here too.
+# Clearing the screen leaves the prompt at the top, so it is drawn at the
+# bottom again. Cmd+K sends Ctrl+L, so it goes through here too.
 _wz_clear_to_bottom() {
-  printf '\e[H\e[2J\e[3J'
-  _wz_to_bottom
+  # zsh redraws upwards from the row the cursor is on: put it on the last one.
+  printf '\e[H\e[2J\e[3J\e[%d;1H' $LINES
   zle .reset-prompt
+  zle -R
+  # Several lines typed, with the cursor above the last of them, has just
+  # pushed a few of the empty rows off the top.
+  printf '\e[3J'
+  _wz_fresh=1
 }
 zle -N clear-screen _wz_clear_to_bottom
 
-[[ -o interactive ]] && _wz_to_bottom
+# Until real output has scrolled off the top, everything this shell has printed
+# is still on the screen, and all that can be above it is empty rows: the ones
+# the prompt was pushed down past. _wz_fresh says that is still so. While it
+# is, _wz_settle throws those rows away, which leaves the wheel nothing to
+# scroll to, and closes any gap under the prompt by moving the whole screen
+# down. Once real output is up there this is an ordinary terminal with a full
+# screen, which stays at the bottom by itself; none of it runs again until the
+# screen is cleared.
+_wz_fresh=1
+
+# Which row the cursor is on, counted from 1, in REPLY. The terminal's answer
+# arrives the way typing does, so it is read straight from the terminal, and
+# anything that really was typed just ahead of it goes back to the line editor.
+# Waiting for the answer is also what makes the next question safe to ask:
+# WezTerm has caught up with everything printed so far.
+_wz_cursor_row() {
+  local got= key tty
+  exec {tty}</dev/tty || return 1
+  print -n '\e[6n'
+  until [[ $got == *$'\e['<->';'<->R ]]; do
+    (( $#got < 4096 )) && read -r -k 1 -t 1 -u $tty key || break
+    got+=$key
+  done
+  exec {tty}<&-
+  local answer=${(M)got%$'\e['<->';'<->R}
+  [[ $got == $answer ]] || zle -U ${got%$answer}
+  [[ -n $answer ]] || return 1
+  REPLY=${${answer#$'\e['}%%;*}
+}
+
+# The pane as WezTerm holds it, a row to each element of $reply: the last 1000
+# rows that have scrolled off the top, then the screen. Nothing else can say
+# what is up there. Two seconds is far longer than this takes; it is so that a
+# WezTerm that has stopped answering cannot hold the prompt up for good.
+_wz_scrolled_off=1000
+_wz_pane_rows() {
+  local text fd
+  exec {fd}< <(command ${WEZTERM_EXECUTABLE_DIR:-/nowhere}/wezterm -n cli --no-auto-start get-text --escapes \
+    --pane-id ${WEZTERM_PANE:-none} --start-line -$_wz_scrolled_off --end-line $(( LINES - 1 )) 2>/dev/null) || return 1
+  IFS= read -r -d '' -t 2 -u $fd text
+  exec {fd}<&-
+  # Every row ends with a return and a newline, and after the last one comes a
+  # line that only switches the colors off.
+  reply=( "${(@ps:\r\n:)text}" )
+  reply[-1]=()
+  (( $#reply ))
+}
+
+_wz_settle() {
+  (( _wz_fresh )) && [[ $CONTEXT == start ]] || return 0
+  # Not while keys are waiting to be read: the terminal's answer would arrive
+  # in among them.
+  if (( PENDING + KEYS_QUEUED_COUNT )); then
+    _wz_later
+    return 0
+  fi
+  local -i resizes=$_wz_resizes row above below i
+  local -a reply
+  if ! { _wz_cursor_row && row=$REPLY && _wz_pane_rows }; then
+    # No answer: this is not a WezTerm pane after all. Do not ask again.
+    (( resizes == _wz_resizes )) && _wz_fresh=0
+    return 0
+  fi
+  above=$(( $#reply - LINES ))
+  # A change of size while measuring, or one zsh has not heard of yet, makes
+  # the numbers worthless. The change itself asks for another go.
+  (( resizes == _wz_resizes && above >= 0 && row <= LINES )) || return 0
+  if (( above >= _wz_scrolled_off )) || [[ -n ${(j::)reply[1,above]//[[:space:]]} ]]; then
+    _wz_fresh=0
+    return 0
+  fi
+  (( above )) && printf '\e[3J'
+  # Empty rows under the line being typed: a taller window, or a list that was
+  # shown there and has gone. Rows added at the top move everything down into
+  # them. Not with more of the command below the cursor, where an empty row
+  # may be part of it.
+  [[ $RBUFFER$POSTDISPLAY == *$'\n'* ]] && return 0
+  for (( i = $#reply; i > above + row; i-- )); do
+    [[ -z ${reply[i]//[[:space:]]} ]] || break
+    (( below++ ))
+  done
+  (( below )) && printf '\e7\e[H\e[%dL\e8\e[%dB' $below $below
+  return 0
+}
+zle -N _wz_settle
+add-zle-hook-widget line-init _wz_settle
+
+# Runs _wz_settle the next time zle is waiting for a key. That is the only time
+# it is safe to ask the terminal a question, because nothing else is reading
+# the answer then: not a list that is open, not an editor. The file is one
+# that is always ready to be read, which is what gets the handler called.
+[[ -n ${_wz_wake-} ]] || exec {_wz_wake}</dev/null
+_wz_later() { (( _wz_fresh )) && zle -F $_wz_wake _wz_when_idle; return 0 }
+_wz_when_idle() {
+  zle -F $1
+  zle _wz_settle
+}
+
+# fzf draws its lists under the prompt, and at the bottom of the window that
+# means pushing everything up to make room. Bring it back when the list closes.
+for _wz_widget in fzf-history-widget fzf-file-widget fzf-cd-widget; do
+  # Loading this file again has just put fzf's own back; one that is still
+  # wrapped from last time must not be wrapped twice.
+  [[ ${functions[$_wz_widget]-_wz_plain_} == *_wz_plain_* ]] && continue
+  unfunction _wz_plain_$_wz_widget 2>/dev/null
+  functions -c $_wz_widget _wz_plain_$_wz_widget 2>/dev/null || continue
+  eval "$_wz_widget() { _wz_plain_$_wz_widget \"\$@\"; local -i ret=\$?; _wz_later; return \$ret }"
+done
+
+# WezTerm rewraps text when a pane changes width, and in doing so moves a
+# cursor that is in the first column up onto the row above: it takes it for one
+# that has just wrapped off the end of that row. A command line with nothing
+# typed on it is exactly that. zsh redraws the prompt from wherever the cursor
+# is, so it draws it one row too high, and a pane that has just been split no
+# longer lines up with the new one beside it. zsh has redrawn by the time a
+# trap runs, so the prompt is drawn once more, a row lower: a cursor-down
+# slipped in ahead of it does that.
+_wz_resized() {
+  [[ $CONTEXT == start && ( -z $LBUFFER || $LBUFFER == *$'\n' ) ]] || return 0
+  local prompt=$PROMPT
+  PROMPT=$'%{\e[B%}'$PROMPT
+  zle .reset-prompt
+  zle -R
+  PROMPT=$prompt
+}
+zle -N _wz_resized
+
+_wz_columns=$COLUMNS
+TRAPWINCH() {
+  local -i was=$_wz_columns
+  _wz_columns=$COLUMNS
+  (( _wz_resizes += 1 ))
+  if zle; then
+    # Only if zle was waiting for a key when it happened. A widget that is
+    # still running, such as an open list, hears of it here only when it ends,
+    # and by then it has redrawn the prompt itself.
+    (( was != COLUMNS && $#funcstack == 1 )) && zle _wz_resized
+    _wz_later
+  fi
+  return 0
+}
+
+# `clear` and `reset` leave the screen the way a new shell finds it.
+_wz_after_clear() {
+  (( _wz_cleared )) || return 0
+  _wz_cleared=0 _wz_fresh=1
+  _wz_to_bottom
+}
+add-zsh-hook precmd _wz_after_clear
+
+# Inside screen or zellij the pane WezTerm knows about is theirs, not this shell's.
+[[ -n ${STY-}${ZELLIJ-} ]] && _wz_fresh=0
+
+# Only the first shell in a pane starts on an empty screen. A shell started
+# from that one, or this file being loaded again, has to leave what is on the
+# screen where it is.
+if [[ ${WEZ_PANE_STARTED-none} != ${WEZTERM_PANE-} ]]; then
+  export WEZ_PANE_STARTED=${WEZTERM_PANE-}
+  _wz_to_bottom
+fi
 
 unset _wz_seq _wz_widget _wz_style _wz_integration _wz_share
