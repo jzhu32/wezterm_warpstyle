@@ -181,7 +181,7 @@ for _, binding in ipairs(config.mouse_bindings) do
 end
 check("a right click jumps back down to the prompt as well", #right_click .. " " .. right_click[1].action.name .. " " .. right_click[1].mods, "1 ScrollToBottom NONE")
 check("  ...but not in a program that takes over the mouse", right_click[1].mouse_reporting, nil)
-check("no scroll bar unless it is asked for, and the margins stay even", tostring(config.enable_scroll_bar) .. " " .. config.window_padding.right, "false 2cell")
+check("a scroll bar on the right edge, in a margin narrowed to one cell", tostring(config.enable_scroll_bar) .. " " .. config.window_padding.right, "true 1cell")
 check("light system picks Warp Light", (load_config("Light")).color_scheme, "Warp Light")
 check("  ...and names the same two colors: the shell picks, WezTerm cannot be relied on to", (load_config("Light")).set_environment_variables.WEZ_BG, "#050505 #FFFFFF")
 config, events, spawned = load_config("Dark")

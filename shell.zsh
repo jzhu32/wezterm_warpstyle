@@ -163,7 +163,9 @@ _wz_count_changes() {
 # longer than the window has been wrapped. One column short of the window, as
 # zsh miscounts a prompt line that is full.
 _wz_rule=$'%F{238}%{\e[9m${(l:COLUMNS-1:: :):-}\e[29m%}%f'
-_wz_mark_prompt=$'%{\e]133;P;k=i\a%}'
+# A carriage return starts every prompt, so that it is drawn from the start of
+# its row even when the cursor is not where zsh believes: see _wz_nudge.
+_wz_mark_prompt=$'%{\r\e]133;P;k=i\a%}'
 _wz_mark_input=$'%{\e]133;B\a%}'
 _wz_prompt_compact=$_wz_mark_prompt$_wz_rule$'\n''%F{244}${_wz_p_env:+$_wz_p_env }%~${_wz_p_branch:+ git:($_wz_p_branch)}%f'$'\n'$_wz_mark_input
 
@@ -390,11 +392,28 @@ zle -N accept-line _wz_accept-line
 # ---- Finding things ---------------------------------------------------------
 
 # Ctrl+R searches command history and Ctrl+T finds a file to put on the line.
+# The lists fill the pane. They are drawn on the terminal's second screen, the
+# one full-screen programs use, so closing one puts back exactly what was there.
+# A list drawn under the prompt left pieces of itself behind when the pane
+# changed size while it was open.
 if (( $+commands[fzf] )); then
-  : ${FZF_DEFAULT_OPTS:='--height=45% --layout=reverse --border=rounded --info=inline'}
+  : ${FZF_DEFAULT_OPTS:='--height=100% --layout=reverse --border=rounded --info=inline'}
   export FZF_DEFAULT_OPTS
   source <(fzf --zsh)
 fi
+
+# WezTerm rewraps the screen a list was opened from even while the list covers
+# it, and a cursor in the first column, as on an empty command line, then goes
+# up a row with each change of width (see _wz_resized): the prompt came back
+# too high and later wrote over output. One column further right the cursor
+# stays on its row, so a list opened from the first column moves it there.
+# Every prompt is drawn from a carriage return, which moves it back.
+_wz_nudge() { [[ -z $LBUFFER || $LBUFFER == *$'\n' ]] && printf '\e[C'; return 0 }
+for _wz_widget in fzf-history-widget fzf-file-widget fzf-cd-widget; do
+  (( $+functions[$_wz_widget] )) || continue
+  eval "_wz_$_wz_widget() { _wz_nudge; $_wz_widget \"\$@\" }"
+  zle -N $_wz_widget _wz_$_wz_widget
+done
 
 # `z part-of-a-name` jumps to a folder you have been in before.
 (( $+commands[zoxide] )) && eval "$(zoxide init zsh)"
@@ -404,25 +423,33 @@ fi
 # Cmd+Shift+G, or a click on the folder chip, lists the folders here the way
 # Warp's folder chip does. Enter goes to the highlighted one, Tab looks inside
 # it without leaving the list, Esc closes. What you had typed is kept.
+#
+# Like the lists above it fills the pane, whatever FZF_DEFAULT_OPTS says, and
+# moves the cursor out of the first column while it is open. Tab starts a new
+# list, and --no-clear keeps the second screen up from one to the next rather
+# than flashing the first between them; leaving it is done here.
 _wz_pick-folder() {
   (( $+commands[fzf] )) || { zle -M "The folder list needs fzf (brew install fzf)."; return 1 }
-  local dir=$PWD picked name
+  local dir=$PWD picked name go=
   local -a lines
+  _wz_nudge
   while true; do
     lines=( $'..\t↑  .. (Parent folder)' )
     for name in $dir/*(N-/:t); do
       lines+=( $name$'\t  '$name )
     done
-    picked=$(print -rl -- $lines | fzf --delimiter=$'\t' --with-nth=2 --no-multi \
+    picked=$(print -rl -- $lines | fzf --height=100% --no-clear --delimiter=$'\t' --with-nth=2 --no-multi \
       --ghost='Search folders…' --border-label=" ${dir/#$HOME/~} " \
       --header='enter: go there · tab: look inside · esc: close' \
       --bind='enter:print(go)+accept,tab:print(look)+accept')
     # Esc, or Enter with nothing matching
-    [[ $picked == *$'\n'* ]] || { zle reset-prompt; return 0 }
+    [[ $picked == *$'\n'* ]] || break
     name=${${picked#*$'\n'}%%$'\t'*}
     if [[ $name == .. ]]; then dir=${dir:h}; else dir=${dir%/}/$name; fi
-    [[ $picked == go$'\n'* ]] && break
+    [[ $picked == go$'\n'* ]] && { go=1; break }
   done
+  printf '\e[?1049l'
+  [[ -n $go ]] || { zle reset-prompt; return 0 }
   zle push-line
   BUFFER="cd -- ${(q-)dir}"
   zle accept-line
@@ -467,6 +494,7 @@ _wz_welcome() {
     '⌘ O'   'open a project'
     '⇧ ⌘ O' 'open it with Claude Code'
     '⌘ D'   'split right, Shift for down'
+    '⇧ ⌘ G' 'folders here'
     '⌘ P'   'all commands'
   )
   print -P '\n %B%F{15}  New terminal session%f%b\n'
@@ -513,14 +541,19 @@ fi
 # that has just been split then sits a row out of place, and a second change of
 # width would put the prompt over the last line of output. zsh has redrawn by
 # the time a trap runs, so the prompt is drawn once more, a row lower: a
-# cursor-down slipped in ahead of it does that.
+# cursor-down slipped in ahead of it does that. Then it is drawn a third time
+# as it is, on the same rows. zsh keeps the prompt it last drew and reuses it
+# when it redraws without reading PROMPT again, as when Alt+C's list closes;
+# kept with the cursor-down in it, that moved the prompt a row lower each time.
+# (The copy is not called `prompt`: in zsh that is PROMPT itself.)
 _wz_resized() {
   [[ $CONTEXT == start && ( -z $LBUFFER || $LBUFFER == *$'\n' ) ]] || return 0
-  local prompt=$PROMPT
+  local drawn=$PROMPT
   PROMPT=$'%{\e[B%}'$PROMPT
   zle .reset-prompt
   zle -R
-  PROMPT=$prompt
+  PROMPT=$drawn
+  zle .reset-prompt
 }
 zle -N _wz_resized
 

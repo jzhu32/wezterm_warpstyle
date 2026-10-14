@@ -135,6 +135,10 @@ would rather not type them. The agent is doing the same `git pull` and
 | `# what you want`, then Enter | Asks Claude for the command and puts it on the line. It is never run for you. |
 | Cmd+click | Opens a link, or a file path in your editor at the right line. |
 
+The lists from Cmd+Shift+G, Ctrl+R and Ctrl+T fill the pane while they are
+open. Closing one leaves the screen exactly as it was, even if the pane
+changed size in the meantime.
+
 ### Tabs and splits
 
 | Keys | What happens |
@@ -170,6 +174,7 @@ from the left instead of running onto a second row.
 | Cmd+Up / Down | Jump from one command to the next in the scrollback. |
 | Cmd+End, Cmd+Home | Jump back down to the prompt after scrolling up, or to the very top. On a laptop End and Home are Fn+Right and Fn+Left. |
 | Right-click | Jump back down to the prompt, like Cmd+End. On a trackpad that is a click with two fingers. Programs that use the mouse themselves keep their own right-click. |
+| The bar on the right edge | Shows how far back you have scrolled; it fills the edge until there is something to scroll back to. Drag it, or click above or below it to move a page. `scroll_bar = false` takes it away. |
 | Cmd+Shift+C | Copy what the last command printed. |
 | Cmd+K | Clear the screen. |
 | Cmd+F | Search what is on screen and in the scrollback. Esc closes it. |
@@ -230,7 +235,8 @@ window change.
   anything, Cmd+End or a right-click brings you straight back to it.
 - A "jump to bottom" button that appears when you scroll up. WezTerm cannot
   draw over a pane, and does not tell the config that a pane is scrolled back.
-  A right-click anywhere in the pane does the same job.
+  The scroll bar shows when you have scrolled back, and a right-click anywhere
+  in the pane takes you down again.
 - Clicking to place the cursor inside a command. Use the arrow keys.
 - Warp's AI agent and its visual blocks.
 

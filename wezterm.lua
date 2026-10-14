@@ -24,7 +24,7 @@ local settings = {
   restore_tabs = true, -- reopen last time's tabs when WezTerm starts
   attention_sound = false, -- also play a sound when a tab needs you
   welcome = true, -- open a new tab or split with a short list of shortcuts
-  scroll_bar = false, -- a bar on the right edge showing how far back you have scrolled
+  scroll_bar = true, -- a bar on the right edge showing how far back you have scrolled
 }
 
 -- ---- Look -------------------------------------------------------------------

@@ -311,6 +311,12 @@ def where():
 nav = os.path.realpath(os.path.join(HOME, "nav"))
 for sub in ("alpha", "beta/inner", "gamma with space"):
     os.makedirs(os.path.join(nav, sub), exist_ok=True)
+# The list fills the pane on the terminal's second screen. Tab opens the next
+# list there too, and the first screen comes back once, at the end.
+SECOND, FIRST = b"\x1b[?1049h", b"\x1b[?1049l"
+def screens(seen):
+    o = bytes(out[seen:])
+    return (SECOND in o, o.count(FIRST), o.rfind(FIRST) > o.rfind(SECOND))
 send("cd '" + nav + "'\r", 0.8)
 send("echo keep"); send(PICK, 1.2); send("bet", 0.5); send("\r", 1.2)
 check("folder list: Enter goes into the highlighted folder", where(), nav + "/beta")
@@ -318,15 +324,19 @@ check("  ...and what was typed is still there", state()[0], "echo keep")
 reset()
 send(PICK, 1.2); send("\r", 1.2)
 check("folder list: the first entry is the parent folder", where(), nav)
+seen = len(out)
 send(PICK, 1.2); send("bet", 0.5); send(TAB, 1.0); send("inn", 0.5); send("\r", 1.2)
 check("folder list: Tab looks inside, Enter then goes two levels down", where(), nav + "/beta/inner")
+check("  ...all in a list that fills the pane, which is left once, at the end", screens(seen), (True, 1, True))
 send("cd '" + nav + "'\r", 0.8)
 send(PICK, 1.2); send("space", 0.5); send("\r", 1.2)
 check("folder list: names with spaces work", where(), nav + "/gamma with space")
+seen = len(out)
 send(PICK, 1.2); send(ESC, 1.0)
-check("folder list: Esc changes nothing", where(), nav + "/gamma with space")
+check("folder list: Esc changes nothing", (where(), screens(seen)), (nav + "/gamma with space", (True, 1, True)))
+seen = len(out)
 send(PICK, 1.2); send("zzzz", 0.5); send("\r", 1.0)
-check("folder list: Enter with no match changes nothing", where(), nav + "/gamma with space")
+check("folder list: Enter with no match changes nothing", (where(), screens(seen)), (nav + "/gamma with space", (True, 1, True)))
 before = len(out)
 send("cd\r", 0.8)
 check("folder chip is a link the terminal can click", "\x1b]8;;wezwarp:folder\x1b\\" in bytes(out[before:]).decode("utf-8", "replace"), True)
@@ -494,7 +504,7 @@ check("clearing the screen leaves an empty row above the prompt", b"\x1b7\x1b[H\
 # WezTerm moves a cursor in the first column up a row when the width changes,
 # and zsh then redraws the prompt a row too high. The cure is a second redraw
 # that starts with one cursor-down; this is what that looks like on the wire.
-LOWER = b"\x1b[B\x1b]133;P;k=i\x07"
+LOWER = b"\x1b[B\r\x1b]133;P;k=i\x07"
 def resize(rows, cols):
     seen = len(out)
     fcntl.ioctl(fd, termios.TIOCSWINSZ, struct.pack("HHHH", rows, cols, 0, 0))
@@ -515,17 +525,17 @@ def loaded_again(before=""):
     seen = len(out)
     send(" " + before + "source '" + os.path.join(REPO, "shell.zsh") + "'\r", 2.0)
     return bytes(out[seen:]).count(NOTE)
-check("a new pane opens with a short list of shortcuts", (startup.count(NOTE), "⌘".encode() in startup, b"all commands" in startup), (1, True, True))
+check("a new pane opens with a short list of shortcuts", (startup.count(NOTE), "⌘".encode() in startup, b"folders here" in startup, b"all commands" in startup), (1, True, True, True))
 # Chips on neighbouring rows touch, so each but the first has a hairline along
 # its top in the window's color: an overline, colored like an underline.
 # wezterm.lua names two colors, and the system's setting says which it is.
 HAIRLINE, LIGHT_HAIRLINE = b"\x1b[53m\x1b[58:2::5:10:15m", b"\x1b[53m\x1b[58:2::240:250:255m"
 check("  ...with a hairline gap above every chip but the first, dark on a dark system",
-      (startup.count(HAIRLINE), startup.count(b"\x1b[55m\x1b[59m"), startup.count(LIGHT_HAIRLINE)), (4, 4, 0))
+      (startup.count(HAIRLINE), startup.count(b"\x1b[55m\x1b[59m"), startup.count(LIGHT_HAIRLINE)), (5, 5, 0))
 open(os.path.join(HOME, "light"), "w").close()
 seen = len(out)
 send(" unset WEZ_WELCOMED; source '" + os.path.join(REPO, "shell.zsh") + "'\r", 2.0)
-check("  ...and light on a light one, whatever WezTerm believed", (bytes(out[seen:]).count(LIGHT_HAIRLINE), bytes(out[seen:]).count(HAIRLINE)), (4, 0))
+check("  ...and light on a light one, whatever WezTerm believed", (bytes(out[seen:]).count(LIGHT_HAIRLINE), bytes(out[seen:]).count(HAIRLINE)), (5, 0))
 seen = len(out)
 send(" unset WEZ_WELCOMED; WEZ_BG='#050a0F'; source '" + os.path.join(REPO, "shell.zsh") + "'\r", 2.0)
 check("  ...where a pane told only the dark color gets no line rather than a wrong one", (bytes(out[seen:]).count(NOTE), b"\x1b[53m" in bytes(out[seen:])), (1, False))

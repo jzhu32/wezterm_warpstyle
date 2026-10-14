@@ -101,8 +101,8 @@ def place(s):
 
 # A prompt is an empty row, the rule, the chips, an empty row, the line you type.
 # TOP is one on an empty screen; FRESH is the first one in a new pane, under
-# the eight rows of shortcuts it opens with.
-TOP, FRESH = (2, 4), (10, 12)
+# the nine rows of shortcuts it opens with.
+TOP, FRESH = (2, 4), (11, 13)
 NOTE = "New terminal session"
 def bottom(s): return (s.rows - 3, s.rows - 1)
 def whole(s):
@@ -148,9 +148,9 @@ if main is None:
 # ---- A new shell ---------------------------------------------------------------
 
 s = settled(main, at_prompt)
-check("a new shell opens with its list of shortcuts at the top of the window", (where(s, NOTE), where(s, "all commands")), ([1], [7]))
-check("  ...a title, an empty row, then one shortcut to a row", [i for i in range(8) if s.screen[i].strip()], [1, 3, 4, 5, 6, 7])
-check("  ...and the chips all end in the same column, beside what they do", sorted({line.index("\ue0b4") for line in s.screen[3:8]}), [9])
+check("a new shell opens with its list of shortcuts at the top of the window", (where(s, NOTE), where(s, "folders here"), where(s, "all commands")), ([1], [7], [8]))
+check("  ...a title, an empty row, then one shortcut to a row", [i for i in range(9) if s.screen[i].strip()], [1, 3, 4, 5, 6, 7, 8])
+check("  ...and the chips all end in the same column, beside what they do", sorted({line.index("\ue0b4") for line in s.screen[3:9]}), [9])
 check("  ...the first prompt under it, after an empty row", (place(s), s.screen[chips(s) - 2].strip()), (FRESH, ""))
 check("  ...and nothing above the screen", len(s.above), 0)
 check("the rule is a row of spaces, which WezTerm does not wrap", s.screen[chips(s) - 1].strip(), "")
@@ -309,21 +309,102 @@ check("  ...and widening again loses nothing", (whole(s), len(where(s, "deep-out
 send(main, "cd\n")
 settled(main, lambda s: at_prompt(s) and s.screen[chips(s)].rstrip().endswith("~ ") and s.screen[s.cursor].strip() == "")
 
-# ---- Lists drawn under the prompt ---------------------------------------------
+# ---- Lists that fill the pane -------------------------------------------------
 
+# They are drawn on the terminal's second screen, so the first one, with the
+# prompt and the output above it, is left alone while they are open.
 if os.path.exists(os.path.join(BREW, "bin", "fzf")):
+    open_list = lambda s: bool(where(s, "╭")) and bool(where(s, "╰"))
+    closed = lambda s: at_prompt(s) and not where(s, "╭")
+    def typed_at_start(pane):
+        """Whether what is typed now lands at the start of the line, where zsh believes the cursor is."""
+        send(pane, "xyz")
+        s = settled(pane, lambda s: at_prompt(s) and "xyz" in s.screen[s.cursor])
+        send(pane, "\x15")
+        settled(pane, lambda s: at_prompt(s) and "xyz" not in s.screen[s.cursor])
+        return s.screen[s.cursor].startswith("xyz")
+
     send(main, "clear\n")
     settled(main, lambda s: at_prompt(s) and not where(s, "deep-output"))
     s = run(main, "echo keep-me", "keep-me")
     home = place(s)
     send(main, "\x12")
-    s = settled(main, lambda s: bool(where(s, "╭")))
-    check("the history list opens under the prompt without moving it", (bool(where(s, "╭")), chips(s)), (True, home[0]))
+    s = settled(main, open_list)
+    check("the history list fills the pane, over the prompt", (where(s, "╭"), where(s, "╰"), chips(s)), ([0], [s.rows - 1], None))
     send(main, "\x1b")
-    s = settled(main, lambda s: at_prompt(s) and not where(s, "╭"))
+    s = settled(main, closed)
     check("  ...and closing it leaves everything where it was", (place(s), len(where(s, "keep-me")), len(s.above)), (home, 2, 0))
+    check("  ...with the cursor at the start of the line", typed_at_start(main), True)
+
+    send(main, "\x12")
+    settled(main, open_list)
+    right = split(main, "right")
+    r = settled(right, at_prompt)
+    s = settled(main, lambda s: open_list(s) and s.cols == COLS - r.cols - 1)
+    check("  ...it is drawn again in a pane that changes size while it is open", (where(s, "╭"), where(s, "╰")), ([0], [s.rows - 1]))
+    send(main, "\x1b")
+    s = settled(main, closed)
+    check("  ...and closing it then leaves the prompt where it was, and nothing of the list", (place(s), whole(s), len(where(s, "keep-me")), where(s, "╰")), (home, True, 2, []))
+    check("  ...with the cursor at the start of the line", typed_at_start(main), True)
+
+    send(main, "\x12")
+    settled(main, open_list)
+    for direction, amount in (("Left", 14), ("Right", 30), ("Left", 9), ("Right", 2)):
+        before = look(main).cols
+        cli("adjust-pane-size", "--pane-id", main, "--amount", amount, direction)
+        settled(main, lambda s: open_list(s) and s.cols != before)
+    send(main, "\x1b")
+    s = settled(main, closed)
+    check("  ...even after the divider is dragged back and forth under it", (place(s), whole(s), len(where(s, "keep-me")), typed_at_start(main)), (home, True, 2, True))
+    close(right)
+    s = settled(main, sized(cols=COLS))
+    check("  ...and closing the split loses nothing either", (place(s), whole(s), len(where(s, "keep-me")), len(s.above)), (home, True, 2, 0))
+
+    send(main, "echo half")
+    settled(main, shows("echo half"))
+    send(main, "\x14")
+    settled(main, open_list)
+    right = split(main, "right")
+    settled(right, at_prompt)
+    send(main, "\x1b")
+    s = settled(main, lambda s: closed(s) and "echo half" in s.screen[s.cursor])
+    check("with a command half typed, a list and a change of width leave it where it is", (s.screen[s.cursor].strip(), place(s)), ("echo half", home))
+    send(main, "\x15")
+    close(right)
+    s = settled(main, lambda s: at_prompt(s) and s.cols == COLS and s.screen[s.cursor].strip() == "")
+
+    send(main, "\x1bc")
+    settled(main, open_list)
+    send(main, "\x1b")
+    s = settled(main, closed)
+    check("Alt+C's list of folders closes the same way", (place(s), len(where(s, "keep-me")), typed_at_start(main)), (home, 2, True))
+
+    send(main, "\x1b[997~")
+    s = settled(main, lambda s: open_list(s) and bool(where(s, "a-project-with-a-long-name")))
+    check("the folder list fills the pane too", (where(s, "╭"), where(s, "╰"), where(s, "keep-me")), ([0], [s.rows - 1], []))
+    send(main, "a-proj")
+    settled(main, lambda s: "a-proj" in "".join(s.screen))
+    send(main, "\t")
+    s = settled(main, lambda s: open_list(s) and bool(where(s, "packages")))
+    check("  ...and Tab shows the folder inside it there", ("~/a-project-with-a-long-name" in s.screen[0], where(s, "keep-me")), (True, []))
+    right = split(main, "right")
+    settled(right, at_prompt)
+    send(main, "\x1b")
+    s = settled(main, closed)
+    check("  ...and Esc, after a change of width, leaves everything where it was", (place(s), whole(s), len(where(s, "keep-me")), where(s, "packages"), typed_at_start(main)), (home, True, 2, [], True))
+    close(right)
+    s = settled(main, sized(cols=COLS))
+    check("  ...and so does closing the split", (place(s), whole(s), len(s.above)), (home, True, 0))
+    send(main, "\x1b[997~")
+    settled(main, lambda s: open_list(s) and bool(where(s, "a-project-with-a-long-name")))
+    send(main, "a-proj")
+    settled(main, lambda s: "a-proj" in "".join(s.screen))
+    send(main, "\r")
+    s = settled(main, lambda s: at_prompt(s) and "a-project-with-a-long-name" in s.screen[chips(s)])
+    kept = where(s, "keep-me")
+    check("  ...as does Enter, going to the folder", (whole(s), len(kept), bool(kept) and kept[-1] < chips(s) - 3, len(s.above)), (True, 2, True, 0))
 else:
-    print("Skipped: the history list needs fzf.")
+    print("Skipped: the lists need fzf.")
 
 print(f"\n{sum(results)}/{len(results)} passed")
 sys.exit(0 if all(results) else 1)
