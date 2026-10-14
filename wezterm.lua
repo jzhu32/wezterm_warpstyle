@@ -140,8 +140,18 @@ config.initial_cols = 120
 config.initial_rows = 34
 config.scrollback_lines = 20000
 -- shell.zsh reads these: whether to print its list of shortcuts, and the color
--- behind them, which it draws the small gaps between their chips in.
-config.set_environment_variables = { WEZ_WELCOME = settings.welcome and "1" or "0", WEZ_BG = theme.bg }
+-- behind them, which it draws the small gaps between their chips in. Both
+-- colors, dark then light, and shell.zsh asks the system which one applies.
+-- `theme` cannot be used for this: after a save WezTerm re-reads this file
+-- where system_is_dark() gets "Light" for an answer whatever is true, and it
+-- is that reading new panes are started from.
+local function bg_of(name)
+  return (themes[name] or themes["Warp Phenomenon"]).bg
+end
+config.set_environment_variables = {
+  WEZ_WELCOME = settings.welcome and "1" or "0",
+  WEZ_BG = bg_of(settings.dark_theme) .. " " .. bg_of(settings.light_theme),
+}
 config.audible_bell = "Disabled"
 -- Cmd+Plus/Minus changes the text size, not the size of the window.
 config.adjust_window_size_when_changing_font_size = false

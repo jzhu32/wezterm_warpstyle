@@ -171,7 +171,8 @@ check("cursor is thickened", config.cursor_thickness, "2pt")
 check("tab text matches the terminal text size", config.window_frame.font_size, 16.0)
 check("full screen is the macOS one, with its own space and Esc to leave", config.native_macos_fullscreen_mode, true)
 check("new shells are told to show their list of shortcuts", config.set_environment_variables.WEZ_WELCOME, "1")
-check("  ...and the color of the window behind them", config.set_environment_variables.WEZ_BG, config.color_schemes[config.color_scheme].background)
+check("  ...and the color of the window behind them, for a dark system and a light one", config.set_environment_variables.WEZ_BG,
+  config.color_schemes["Warp Dark"].background .. " " .. config.color_schemes["Warp Light"].background)
 check("cmd+end jumps back down to the prompt", key(config, "End", "CMD").name, "ScrollToBottom")
 check("  ...and cmd+home to the very top", key(config, "Home", "CMD").name, "ScrollToTop")
 local right_click = {}
@@ -182,6 +183,7 @@ check("a right click jumps back down to the prompt as well", #right_click .. " "
 check("  ...but not in a program that takes over the mouse", right_click[1].mouse_reporting, nil)
 check("no scroll bar unless it is asked for, and the margins stay even", tostring(config.enable_scroll_bar) .. " " .. config.window_padding.right, "false 2cell")
 check("light system picks Warp Light", (load_config("Light")).color_scheme, "Warp Light")
+check("  ...and names the same two colors: the shell picks, WezTerm cannot be relied on to", (load_config("Light")).set_environment_variables.WEZ_BG, "#050505 #FFFFFF")
 config, events, spawned = load_config("Dark")
 
 local w = window(""); key(config, "a", "CMD").run(w, pane("1"))

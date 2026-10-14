@@ -41,10 +41,19 @@ case "$*" in *"nothing useful"*) exit 0;; esac
 printf 'du -sh * | sort -h\n'
 """)
 os.chmod(os.path.join(HOME, "bin", "claude"), 0o755)
+with open(os.path.join(HOME, "bin", "defaults"), "w") as f:
+    f.write(r"""#!/bin/sh
+# Stand-in for the system's dark/light setting: dark, unless the file `light` is there.
+[ "$*" = "read -g AppleInterfaceStyle" ] || exit 2
+[ -e "$ZDOTDIR/light" ] && exit 1
+echo Dark
+""")
+os.chmod(os.path.join(HOME, "bin", "defaults"), 0o755)
 
 ENV = {
     "HOME": REAL_HOME, "ZDOTDIR": HOME, "TERM": "xterm-256color", "TERM_PROGRAM": "WezTerm",
-    "WEZTERM_PANE": PANE, "WEZ_BG": "#050a0F", "PATH": BREW + "/bin:/usr/bin:/bin:/usr/sbin:/sbin", "HOMEBREW_PREFIX": BREW,
+    "WEZTERM_PANE": PANE, "WEZ_BG": "#050a0F #F0faFF", "HOMEBREW_PREFIX": BREW,
+    "PATH": os.path.join(HOME, "bin") + ":" + BREW + "/bin:/usr/bin:/bin:/usr/sbin:/sbin",
     "LANG": "en_US.UTF-8", "_ZO_DATA_DIR": os.path.join(HOME, "zo"),
 }
 ROWS, COLS = 40, 120
@@ -509,8 +518,19 @@ def loaded_again(before=""):
 check("a new pane opens with a short list of shortcuts", (startup.count(NOTE), "⌘".encode() in startup, b"all commands" in startup), (1, True, True))
 # Chips on neighbouring rows touch, so each but the first has a hairline along
 # its top in the window's color: an overline, colored like an underline.
-HAIRLINE = b"\x1b[53m\x1b[58:2::5:10:15m"
-check("  ...with a hairline gap above every chip but the first", (startup.count(HAIRLINE), startup.count(b"\x1b[55m\x1b[59m")), (4, 4))
+# wezterm.lua names two colors, and the system's setting says which it is.
+HAIRLINE, LIGHT_HAIRLINE = b"\x1b[53m\x1b[58:2::5:10:15m", b"\x1b[53m\x1b[58:2::240:250:255m"
+check("  ...with a hairline gap above every chip but the first, dark on a dark system",
+      (startup.count(HAIRLINE), startup.count(b"\x1b[55m\x1b[59m"), startup.count(LIGHT_HAIRLINE)), (4, 4, 0))
+open(os.path.join(HOME, "light"), "w").close()
+seen = len(out)
+send(" unset WEZ_WELCOMED; source '" + os.path.join(REPO, "shell.zsh") + "'\r", 2.0)
+check("  ...and light on a light one, whatever WezTerm believed", (bytes(out[seen:]).count(LIGHT_HAIRLINE), bytes(out[seen:]).count(HAIRLINE)), (4, 0))
+seen = len(out)
+send(" unset WEZ_WELCOMED; WEZ_BG='#050a0F'; source '" + os.path.join(REPO, "shell.zsh") + "'\r", 2.0)
+check("  ...where a pane told only the dark color gets no line rather than a wrong one", (bytes(out[seen:]).count(NOTE), b"\x1b[53m" in bytes(out[seen:])), (1, False))
+os.remove(os.path.join(HOME, "light"))
+send(" WEZ_BG='#050a0F #F0faFF'\r", 0.3)
 check("  ...which loading the setup again does not repeat", loaded_again(), 0)
 check("  ...it is the first shell in a pane that shows it", loaded_again("unset WEZ_WELCOMED; "), 1)
 check("  ...unless wezterm.lua has it switched off", loaded_again("unset WEZ_WELCOMED; WEZ_WELCOME=0; "), 0)

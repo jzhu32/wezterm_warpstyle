@@ -459,8 +459,9 @@ fi
 # started from that one. It is ordinary output, so it scrolls away as you work
 # and Cmd+K removes it. `welcome = false` in wezterm.lua turns it off.
 _wz_welcome() {
-  local keys text line gap= ungap= hex=${WEZ_BG-}
+  local keys text line gap= ungap= hex=
   local -i row=0
+  local -a bg=(${=WEZ_BG-})
   local -a notes=(
     '#'     'ask Claude for the command'
     '⌘ O'   'open a project'
@@ -471,8 +472,15 @@ _wz_welcome() {
   print -P '\n %B%F{15}  New terminal session%f%b\n'
   # A chip fills its row from top to bottom, so chips on neighbouring rows run
   # into one another. A hairline along the top of each but the first, in the
-  # color of the window behind them, reads as a small gap. It is an overline,
-  # and wezterm.lua says what that color is; without it the chips just touch.
+  # color of the window behind them, reads as a small gap. It is an overline.
+  # wezterm.lua names that color twice, for a dark system and for a light one,
+  # and which of the two it is gets asked here: WezTerm does not reliably know
+  # when it starts a pane, and in the wrong one the gap is a bright line.
+  # Without a color the chips just touch.
+  if (( $#bg )); then
+    hex=${bg[2]-}
+    [[ $(command defaults read -g AppleInterfaceStyle 2>/dev/null) == Dark ]] && hex=$bg[1]
+  fi
   if [[ $hex == \#[[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]] ]]; then
     gap=$'\e[53m\e[58:2::'$(( 16#$hex[2,3] )):$(( 16#$hex[4,5] )):$(( 16#$hex[6,7] ))m ungap=$'\e[55m\e[59m'
   fi
