@@ -119,8 +119,11 @@ with the changes in `patches/tab-drag.patch`. The patch builds on
 [Jefffrey's tab dragging](https://github.com/wezterm/wezterm/pull/6527) and
 [Jay Johnston's drag preview](https://github.com/wezterm/wezterm/pull/7926),
 with fixes for fast moves, cancelling a drag when the window loses focus, and
-macOS passing tab drags through to the window. The rest of the app stays at
-that pinned upstream version.
+macOS passing tab drags through to the window. The dragged tab keeps a stable
+snapshot of its label, follows the exact point where it was grabbed, and swaps
+only when its center crosses a neighboring tab. A small movement threshold
+keeps ordinary clicks still. The rest of the app stays at that pinned upstream
+version.
 
 The app is built and signed locally, without an Apple notarization certificate.
 Source, compiled files and app backups stay in the ignored `.build/` folder;
@@ -298,8 +301,9 @@ python3 tests/run.py
 `./build-wezterm.sh` also runs the native drag boundary tests, checks the app's
 signature and configuration, and rejects binaries linked to Homebrew libraries.
 After installing a changed native patch, manually check dragging in both
-directions, a fast move across several tabs, switching tabs, the close and `+`
-buttons, and dragging the empty part of the bar to move the window.
+directions, grabbing near either edge, keeping the label visible, a fast move
+across several tabs, switching tabs, the close and `+` buttons, and dragging
+the empty part of the bar to move the window.
 
 This drives a real zsh through every editing feature, runs the logic in
 `wezterm.lua` against a stand-in for WezTerm, and starts WezTerm's own engine
