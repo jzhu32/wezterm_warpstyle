@@ -35,8 +35,27 @@ _wz_at_prompt() {
 _wz_in_command() {
   _wz_started=$EPOCHREALTIME
   printf '\033]1337;SetUserVar=WEZ_ZLE=MA==\007'  # "0"
-  local -a typed=( ${(z)1} )
-  _wz_set_var WEZ_CMD ${typed[1]:t}
+  local -a typed=( "${(@Q)${(z)1}}" )
+  local i=1
+  # Identify the executable without exporting arguments, prompts or API keys.
+  while (( i <= $#typed )) && [[ ${typed[i]} == (command|exec|env|--) || ${typed[i]} =~ '^[A-Za-z_][A-Za-z0-9_]*=' ]]; do
+    (( i++ ))
+  done
+  local name=${typed[i]-}
+  name=${name:t}
+  if [[ $name == (npx|bunx) ]]; then
+    (( i++ ))
+    while (( i <= $#typed )) && [[ ${typed[i]} == (-y|--yes|--no-install|--) ]]; do
+      (( i++ ))
+    done
+    # shortcut: simple package launches only; extend this when supporting other npm options.
+    local package=${typed[i]-}
+    if [[ -n $package && $package != -* ]]; then
+      name=${package:t}
+      name=${name%%@*}
+    fi
+  fi
+  _wz_set_var WEZ_CMD "$name"
   # The tab shows the command until the program sets a title of its own.
   print -rn -- $'\e]0;'${(V)${1%%$'\n'*}[1,80]}$'\a'
 }

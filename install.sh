@@ -28,12 +28,11 @@ fi
 
 # ---- Config files -----------------------------------------------------------
 
-# The two files stay in this folder and are linked into place, so `git pull`
-# here updates the terminal.
+# Config and the bundled logo font stay here, so `git pull` updates both.
 say "Linking the config into $config"
 mkdir -p $config $HOME/.cache/wezterm-warp
 chmod 700 $HOME/.cache/wezterm-warp
-for file in wezterm.lua shell.zsh; do
+for file in wezterm.lua shell.zsh fonts; do
   if [[ -e $config/$file && ! -L $config/$file ]]; then
     mv $config/$file $config/$file.before-warpstyle
     print "    kept your old $file as $file.before-warpstyle"

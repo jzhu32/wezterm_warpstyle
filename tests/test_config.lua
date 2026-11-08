@@ -80,7 +80,7 @@ local function mux_window_stub()
   return w
 end
 
-local function load_config(appearance)
+local function load_config(appearance, config_dir)
   local events, spawned = {}, {}
   local action = setmetatable({}, {
     __index = function(_, name)
@@ -91,6 +91,7 @@ local function load_config(appearance)
     action = action,
     home_dir = fake_home,
     config_file = "/tmp/wezterm.lua",
+    config_dir = config_dir or "/tmp",
     gui = { get_appearance = function() return appearance end },
     config_builder = function() return {} end,
     font_with_fallback = function(f) return f end,
@@ -171,6 +172,11 @@ check("  ...and Warp's cyan cursor", config.color_schemes["Warp Dark"].cursor_bg
 check("Phenomenon gets a visible cursor too", config.color_schemes["Warp Phenomenon"].cursor_bg, "#19AAD8")
 check("cursor is thickened", config.cursor_thickness, "2pt")
 check("tab text matches the terminal text size", config.window_frame.font_size, 16.0)
+check("terminal text can fall back to the bundled logo font", config.font[2], "WezTerm Agent Icons")
+check("tab text uses the same logo font", config.window_frame.font[2], config.font[2])
+check("cmd+shift+a finds tabs with fuzzy search", key(config, "a", "CMD|SHIFT").arg.flags, "FUZZY|TABS")
+check("the logo font is loaded from the linked config directory", config.font_dirs[1], "/tmp/fonts")
+check("a relative --config-file also finds its logo font", (load_config("Dark", "")).font_dirs[1], "./fonts")
 check("full screen is the macOS one, with its own space and Esc to leave", config.native_macos_fullscreen_mode, true)
 check("new shells are told to show their list of shortcuts", config.set_environment_variables.WEZ_WELCOME, "1")
 check("  ...and the color of the window behind them, for a dark system and a light one", config.set_environment_variables.WEZ_BG,
@@ -198,6 +204,15 @@ w = window(""); key(config, "a", "CMD").run(w, pane("0", { process = "/opt/homeb
 check("cmd+a inside Codex (known from the shell) arms select-all", w.sent[1], "ActivateKeyTable:select_all")
 w = window(""); key(config, "a", "CMD").run(w, pane("1", { process = "/bin/zsh", cmd = "codex" }))
 check("  ...but back at the prompt it goes to zsh", w.sent[1], "SendString:\27[990~")
+local keeps_input = true
+for _, cmd in ipairs({ "gemini", "qwen", "muse", "dsh", "deepseek", "opencode", "ollama", "copilot" }) do
+  w = window("")
+  local p = pane("0", { process = "/opt/homebrew/bin/node", cmd = cmd })
+  key(config, "a", "CMD").run(w, p)
+  key(config, "z", "CMD").run(w, p)
+  keeps_input = keeps_input and #w.sent == 0
+end
+check("new CLI logos do not enable Claude/Codex-specific input editing", keeps_input, true)
 
 local function burst(name, k)
   local win = window("")
@@ -294,6 +309,35 @@ check("tab: Claude Code without a title is not shown as a version number",
   squeeze(tab(0, true, { current_working_dir = root, foreground_process_name = CLAUDE, title = "2.1.296", user_vars = {} })), "  \u{ec82} claude  ⌘1 ")
 check("tab: Codex gets its own mark even when the foreground process is Node",
   squeeze(tab(0, true, { current_working_dir = root, foreground_process_name = "/opt/homebrew/bin/node", title = "Build the settings view", user_vars = { WEZ_ZLE = "0", WEZ_CMD = "codex" } })), "  \u{ec81} Build the settings view  ⌘1 ")
+local cli_cases = {
+  { "gemini", "\u{100001}", "Gemini CLI" }, { "qwen", "\u{100002}", "Qwen Code" },
+  { "muse", "\u{100003}", "Muse Code" }, { "dsh", "\u{100004}", "DeepSeek" },
+  { "deepseek", "\u{100004}", "DeepSeek" }, { "opencode", "\u{100006}", "OpenCode" },
+  { "ollama", "\u{100005}", "Ollama" }, { "copilot", "\u{ec1e}", "GitHub Copilot" },
+}
+local cli_panes = {}
+for _, case in ipairs(cli_cases) do
+  local cmd, icon, label = unpack(case)
+  local p = { foreground_process_name = "/opt/homebrew/bin/node", title = "node", user_vars = { WEZ_ZLE = "0", WEZ_CMD = cmd } }
+  cli_panes[#cli_panes + 1] = p
+  check("tab: " .. cmd .. " is recognized behind Node and gets a readable default name",
+    squeeze(tab(0, true, p)), "  " .. icon .. " " .. label .. "  ⌘1 ")
+  check("tab: a directly launched " .. cmd .. " keeps its changing task title",
+    squeeze(tab(0, true, { foreground_process_name = "/opt/bin/" .. cmd, title = "Fix the tests", user_vars = {} })),
+    "  " .. icon .. " Fix the tests  ⌘1 ")
+  p.tab_title = "My review"
+  check("tab: renaming " .. cmd .. " keeps its mark", squeeze(tab(0, true, p)), "  " .. icon .. " My review  ⌘1 ")
+  p.tab_title = nil
+  check("tab: a crowded " .. cmd .. " tab keeps its mark", flatten(tab_items(0, true, p, 2, 7)):find(icon, 1, true) ~= nil, true)
+end
+check("tab: an npx package name is recognized after the shell unwraps it",
+  squeeze(tab(0, true, { foreground_process_name = "/bin/node", title = "node", user_vars = { WEZ_ZLE = "0", WEZ_CMD = "gemini-cli" } })),
+  "  \u{100001} Gemini CLI  ⌘1 ")
+check("tab: a CLI name appearing in ordinary arguments is not treated as the running app",
+  flatten(tab_items(0, true, { foreground_process_name = "/bin/node", title = "node gemini", user_vars = { WEZ_ZLE = "0", WEZ_CMD = "node" } })):find("\u{100001}", 1, true), nil)
+check("tab: returning to the prompt clears a new CLI's stale mark",
+  squeeze(tab(0, true, { current_working_dir = root, foreground_process_name = "/bin/zsh", title = "~", user_vars = { WEZ_ZLE = "1", WEZ_CMD = "gemini" } })),
+  "  \u{f413} ~  ⌘1 ")
 check("tab: a name you set keeps the agent mark",
   squeeze(tab(0, true, { tab_title = "Backend review", foreground_process_name = CLAUDE, title = "✳ ignored", user_vars = {} })), "  \u{ec82} Backend review  ⌘1 ")
 check("tab: a non-Latin Claude title keeps its first character",
@@ -391,11 +435,13 @@ end
 -- foreground runs, including the agent mark, branch, shortcut and attention dot.
 codex_tab.active_pane.pane_id = 77
 GLOBAL.attention_77 = true
+local contrast_panes = { shell_tab, claude_tab, codex_tab.active_pane }
+for _, p in ipairs(cli_panes) do contrast_panes[#contrast_panes + 1] = p end
 for name, palette in pairs(config.color_schemes) do
   local failures = {}
   for _, state in ipairs({ "active_tab", "inactive_tab", "inactive_tab_hover" }) do
     local style = palette.tab_bar[state]
-    for _, p in ipairs({ shell_tab, claude_tab, codex_tab.active_pane }) do
+    for _, p in ipairs(contrast_panes) do
       for _, width in ipairs({ 7, 48 }) do
         local items = light_events["format-tab-title"](
           { tab_title = "", tab_index = 0, is_active = state == "active_tab", active_pane = p },

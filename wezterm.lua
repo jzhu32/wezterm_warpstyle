@@ -129,7 +129,8 @@ local theme = themes[theme_name] or themes["Warp Phenomenon"]
 config.color_scheme = theme_name
 -- The native tab controls read colors.tab_bar directly, rather than the named palette.
 config.colors = { tab_bar = config.color_schemes[theme_name].tab_bar }
-config.font = wezterm.font_with_fallback({ settings.font, "Menlo" })
+config.font_dirs = { (wezterm.config_dir ~= "" and wezterm.config_dir or ".") .. "/fonts" }
+config.font = wezterm.font_with_fallback({ settings.font, "WezTerm Agent Icons", "Menlo" })
 config.font_size = settings.font_size
 config.line_height = settings.line_height
 config.window_background_opacity = settings.opacity
@@ -176,7 +177,7 @@ config.window_decorations = "INTEGRATED_BUTTONS|RESIZE"
 config.native_macos_fullscreen_mode = true
 config.switch_to_last_active_tab_when_closing_tab = true
 config.window_frame = {
-  font = wezterm.font_with_fallback({ settings.font, "Menlo" }),
+  font = wezterm.font_with_fallback({ settings.font, "WezTerm Agent Icons", "Menlo" }),
   font_size = settings.tab_font_size,
   active_titlebar_bg = theme.chrome,
   inactive_titlebar_bg = theme.chrome,
@@ -250,17 +251,28 @@ local function keep_start(text, width)
   return wezterm.truncate_right(text, width - 1) .. "…"
 end
 
+local agent_commands = {
+  claude = "claude", codex = "codex", gemini = "gemini", ["gemini-cli"] = "gemini",
+  qwen = "qwen", ["qwen-code"] = "qwen", muse = "muse",
+  dsh = "deepseek", deepseek = "deepseek", ["deepseek-cli"] = "deepseek",
+  opencode = "opencode", ollama = "ollama", copilot = "copilot",
+}
+local agent_labels = {
+  claude = "Claude", codex = "Codex", gemini = "Gemini CLI", qwen = "Qwen Code",
+  muse = "Muse Code", deepseek = "DeepSeek", opencode = "OpenCode",
+  ollama = "Ollama", copilot = "GitHub Copilot",
+}
 local function agent_name(program, command)
-  command = (command or ""):match("^%s*(.-)%s*$")
-  if program == "claude" or command == "claude" or command:match("^claude%s") then
-    return "claude"
-  elseif program == "codex" or command == "codex" or command:match("^codex%s") then
-    return "codex"
-  end
+  local invoked = (command or ""):match("^%s*(%S+)") or ""
+  return agent_commands[program] or agent_commands[invoked]
 end
 
--- Real brand glyphs from Nerd Fonts 3.5.1 (Codicons and Devicons).
-local agent_icons = { claude = "\u{ec82}", codex = "\u{ec81}" }
+-- Nerd Fonts 3.5.1 plus the six real brand outlines in fonts/.
+local agent_icons = {
+  claude = "\u{ec82}", codex = "\u{ec81}", copilot = "\u{ec1e}",
+  gemini = "\u{100001}", qwen = "\u{100002}", muse = "\u{100003}",
+  deepseek = "\u{100004}", ollama = "\u{100005}", opencode = "\u{100006}",
+}
 local program_icons = {
   nvim = "\u{e83a}", vim = "\u{e7c5}", python = "\u{e73c}",
   node = "\u{e718}", npm = "\u{e71e}", npx = "\u{e71e}",
@@ -271,7 +283,7 @@ local claude_status_marks = { ["✳"] = true, ["✻"] = true, ["✽"] = true, ["
 
 -- What a tab is called, as Warp's tab list has it: a name you gave it, else
 -- the folder and git branch while its shell is waiting, else the running
--- program's own title. Claude and Codex keep a small, recognizable mark even
+-- program's own title. Recognized CLIs keep a small brand mark even
 -- when their title changes. Returns an icon, the name, the branch and agent.
 local function tab_label(tab_title, pane, room)
   local vars = pane.user_vars or {}
@@ -292,8 +304,9 @@ local function tab_label(tab_title, pane, room)
     return "\u{f413}", keep_end(name, room - taken), branch
   end
   -- Until a program names itself the title is just its file name.
-  local title = pane.title
-  if title == "" or title == basename(pane.foreground_process_name or "") then
+  local title = pane.title or ""
+  local default_title = title == "" or title == basename(pane.foreground_process_name or "")
+  if default_title then
     title = program
   end
   -- Activity already has the attention dot; keep the application's logo stable.
@@ -302,9 +315,9 @@ local function tab_label(tab_title, pane, room)
     name = claude_status_marks[status] and name or title
     name = name ~= "" and name or "Claude"
     return agent_icons.claude, keep_start(name, room - 2), nil, agent
-  elseif agent == "codex" then
-    local name = title ~= "" and title or "Codex"
-    return agent_icons.codex, keep_start(name, room - 2), nil, agent
+  elseif agent then
+    local name = default_title and agent_labels[agent] or title
+    return agent_icons[agent], keep_start(name, room - 2), nil, agent
   end
   local icon = program_icons[program] or (program:match("^python%d") and program_icons.python)
   if icon then
@@ -385,7 +398,7 @@ wezterm.on("format-tab-title", function(tab, tabs, panes, effective_config, _, m
     add(items, colored(tab_theme.attention, dot))
   end
   local agent_color = agent == "claude" and tab_theme.claude
-    or agent == "codex" and tab_theme.fg
+    or agent and tab_theme.fg
   if tab.is_active then
     add(items, colored(agent_color or tab_theme.cursor or tab_theme.accent, icon))
     add(items, { Attribute = { Intensity = "Bold" } }, { Text = label }, "ResetAttributes")
@@ -732,8 +745,11 @@ local detach_tab = wezterm.action_callback(function(window)
   end
 end)
 
+local find_tab = act.ShowLauncherArgs({ flags = "FUZZY|TABS", title = "Find a tab" })
+
 wezterm.on("augment-command-palette", function()
   return {
+    { brief = "Find a tab", icon = "md_magnify", action = find_tab },
     { brief = "Rename tab", icon = "md_rename_box", action = rename_tab },
     { brief = "Move this tab to a new window", icon = "md_window_restore", action = detach_tab },
     { brief = "Close this split", icon = "md_close_box_outline",
@@ -906,6 +922,7 @@ config.keys = {
   { key = "g", mods = "CMD|SHIFT", action = to_shell(shell.pick_folder) },
 
   -- Tabs
+  { key = "a", mods = "CMD|SHIFT", action = find_tab },
   { key = "r", mods = "CMD|SHIFT", action = rename_tab },
   { key = "LeftArrow", mods = "CTRL|SHIFT", action = act.MoveTabRelative(-1) },
   { key = "RightArrow", mods = "CTRL|SHIFT", action = act.MoveTabRelative(1) },

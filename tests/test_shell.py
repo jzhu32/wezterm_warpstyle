@@ -6,7 +6,7 @@
 History, the clipboard and zoxide's data go to a throwaway folder, and a
 stand-in replaces Claude Code, so nothing of yours is touched or spent.
 """
-import fcntl, os, pty, select, shutil, struct, sys, tempfile, termios, time
+import base64, fcntl, os, pty, re, select, shlex, shutil, struct, sys, tempfile, termios, time
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 WITH_ZSHRC = "--with-zshrc" in sys.argv
@@ -261,6 +261,23 @@ check("entered command collapses to a compact header in theme gray", "\x1b[90m" 
 check("prompt and input are marked for the terminal", "\x1b]133;P;k=i\x07" in shown and "\x1b]133;B\x07" in shown, True)
 check("tab title is set to the command while it runs", "\x1b]0;false\x07" in shown, True)
 check("program name is reported for the tab", "SetUserVar=WEZ_CMD=ZmFsc2U=" in shown, True)
+
+# Exercise the real preexec parser as data; these do not launch agents or make requests.
+for command, expected in [
+    ("gemini --model demo", "gemini"), ("/opt/bin/qwen", "qwen"),
+    ("muse", "muse"), ("dsh web", "dsh"), ("deepseek-cli --help", "deepseek-cli"),
+    ("env DEMO=secret command npx --yes @google/gemini-cli@latest --prompt qwen", "gemini-cli"),
+    ("DEMO=secret npx -y @qwen-code/qwen-code@latest", "qwen-code"),
+    ("bunx --yes @deepseek-ai/dsh@latest web", "dsh"),
+    ("npx --package @google/gemini-cli echo codex", "npx"),
+    ("printf '%s' gemini", "printf"), ("npx", "npx"), ("ONLY_VAR=secret", ""),
+    ('"/path with spaces/gemini" --help', "gemini"),
+    ("command -- qwen", "qwen"), ("exec muse", "muse"),
+]:
+    before = len(out)
+    send(" _wz_in_command " + shlex.quote(command) + "\r", .35)
+    names = re.findall(rb"SetUserVar=WEZ_CMD=([A-Za-z0-9+/=]*)\x07", bytes(out[before:]))
+    check("CLI identity without arguments: " + command, base64.b64decode(names[-1]).decode() if names else None, expected)
 
 
 send("# how big is each folder here\r", 1.2)

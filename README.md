@@ -35,8 +35,8 @@ A few things worth knowing:
 
 - The installer is safe to run again. It adds missing dependencies and installs
   the custom app when its source or patch changes.
-- `./install.sh --no-brew` only links the config; it skips dependencies and the
-  custom app build.
+- `./install.sh --no-brew` links the config and logo font; it skips dependencies
+  and the custom app build.
 - An open WezTerm picks up `wezterm.lua` the moment it changes. `shell.zsh`
   applies to new tabs; a tab you already have takes it after
   `source ~/.config/wezterm/shell.zsh`.
@@ -54,8 +54,9 @@ that in [Ask an agent instead](#ask-an-agent-instead).
    and replaces `/Applications/WezTerm.app`. Existing Homebrew WezTerm casks
    are removed after the custom app has built successfully.
    The installer also updates Hack Nerd Font for the Claude and OpenAI logo glyphs.
-2. Links `wezterm.lua` and `shell.zsh` into `~/.config/wezterm`. Files that
-   were already there are kept with `.before-warpstyle` added to their names.
+2. Links `wezterm.lua`, `shell.zsh` and the bundled `fonts` directory into
+   `~/.config/wezterm`. Existing files and directories are kept with
+   `.before-warpstyle` added to their names.
 3. Adds one line to `~/.zshrc` that loads `shell.zsh` inside WezTerm. Your
    original is saved as `~/.zshrc.before-wezterm-setup`.
 4. If Claude Code is installed, sets `"preferredNotifChannel": "terminal_bell"`
@@ -183,6 +184,7 @@ changed size in the meantime.
 |---|---|
 | Cmd+T | New tab. |
 | Cmd+1 to Cmd+8 | Go to that tab. Cmd+9 goes to the last one, whatever its number. |
+| Cmd+Shift+A, or Cmd+P and "Find a tab" | Search open tabs by title and switch to one. |
 | Cmd+Shift+[ / ], or Ctrl+Tab | The tab before or after this one. |
 | Cmd+Shift+R, or Cmd+P and "Rename tab" | Name the tab yourself. An empty name goes back to the automatic one. |
 | Ctrl+Shift+Left / Right | Move the tab. |
@@ -198,6 +200,7 @@ Tabs share the bar evenly. Each shows its last two folders and git branch
 while the shell is waiting, or the running program's own title. Claude and
 Codex tabs show their real logos from Nerd Fonts 3.5.1: Claude in warm orange,
 Codex with the OpenAI mark in white on dark themes and near-black on light.
+The other CLI logos come from the small [bundled font](fonts/README.md).
 Tab accents follow each window's palette even after a config reload. Native
 tab controls, shortcuts, shell suggestions and welcome text also adapt to the
 theme with readable contrast. Common tools such as Git, Python, Node, Docker,
@@ -205,6 +208,38 @@ Vim and Neovim use their own icons too. A tab gets an amber dot, and you get a
 notification, when Claude Code finishes or asks
 something while you are elsewhere, or when a command that ran longer than 30
 seconds ends. The tabs you had open come back the next time WezTerm starts.
+
+### Other AI tools
+
+Tab logos recognize these commands directly, including when a Node or Python
+process hosts the CLI. A custom tab name and the application's changing task
+title keep the same logo. In crowded bars the logo stays visible alongside a
+shortened title.
+
+| Tool | Recognized command |
+|---|---|
+| [Gemini CLI](https://github.com/google-gemini/gemini-cli) | `gemini` |
+| [Qwen Code](https://github.com/QwenLM/qwen-code) | `qwen` |
+| [Meta Muse Code](https://dev.meta.ai/docs/muse-code) | `muse` (Meta mark) |
+| [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) | `dsh`; also `deepseek` and `deepseek-cli` wrappers |
+| [GitHub Copilot CLI](https://github.com/github/copilot-cli) | `copilot` |
+| [OpenCode](https://github.com/anomalyco/opencode) | `opencode` |
+| [Ollama](https://github.com/ollama/ollama) | `ollama` |
+
+Simple `npx` and `bunx` launches are recognized too, including `-y`/`--yes`
+and package versions, for example `npx -y @google/gemini-cli@latest` or
+`npx @qwen-code/qwen-code`. Environment assignments and `command`/`exec`
+prefixes work; arguments, API keys and prompt text are not sent in the CLI
+identity metadata. More complex package-runner options keep generic process
+detection.
+
+This integrates display and navigation; each CLI still handles its own
+installation, authentication and input shortcuts. Claude/Codex-specific
+selection and undo handling stays limited to those two tools. A model used
+inside another app keeps that app's identity: for example, DeepSeek in Ollama
+keeps the Ollama mark and the title supplied by Ollama. A notification requires
+the CLI to ring the terminal bell; the terminal does not guess when an AI turn
+finishes.
 
 Close buttons have larger click targets. Closing the active tab returns to the
 most recently used remaining tab; tabs with running work still ask before closing.
