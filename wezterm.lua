@@ -236,15 +236,28 @@ local function keep_start(text, width)
   return wezterm.truncate_right(text, width - 1) .. "…"
 end
 
+local function agent_name(program, command)
+  command = (command or ""):match("^%s*(.-)%s*$")
+  if program == "claude" or command == "claude" or command:match("^claude%s") then
+    return "claude"
+  elseif program == "codex" or command == "codex" or command:match("^codex%s") then
+    return "codex"
+  end
+end
+
 -- What a tab is called, as Warp's tab list has it: a name you gave it, else
 -- the folder and git branch while its shell is waiting, else the running
--- program's own title. Returns an icon, the name and the branch.
+-- program's own title. Claude and Codex keep a small, recognizable mark even
+-- when their title changes. Returns an icon, the name, the branch and agent.
 local function tab_label(tab_title, pane, room)
   local vars = pane.user_vars or {}
   local program = program_name(pane.foreground_process_name)
+  local agent = agent_name(program, vars.WEZ_CMD)
   local waiting = vars.WEZ_ZLE == "1" or (vars.WEZ_ZLE == nil and (program == "" or shells[program]))
   if tab_title ~= "" then
-    return "", keep_start(tab_title, room)
+    local icon = agent == "claude" and "✳" or agent == "codex" and "◇" or ""
+    local taken = icon ~= "" and 2 or 0
+    return icon, keep_start(tab_title, room - taken), nil, agent
   elseif waiting then
     -- The folder comes first; the branch gets whatever room is left.
     local name = short_folder(pane)
@@ -259,7 +272,21 @@ local function tab_label(tab_title, pane, room)
   if title == "" or title == basename(pane.foreground_process_name or "") then
     title = program
   end
-  -- Claude Code starts its title with a status symbol; plain names get an icon.
+  -- Claude Code supplies a changing leading status mark. Keep it in the icon
+  -- slot so the title itself stays aligned, and give Codex its own stable mark.
+  if agent == "claude" then
+    local status, name = title:match("^([%z\1-\127\194-\244][\128-\191]*)%s*(.*)$")
+    if not status or status:byte(1) < 128 then
+      status, name = "✳", title
+    end
+    name = name ~= "" and name or "Claude"
+    return status, keep_start(name, room - 2), nil, agent
+  elseif agent == "codex" then
+    local name = title ~= "" and title or "Codex"
+    return "◇", keep_start(name, room - 2), nil, agent
+  end
+  -- Plain program names get the terminal icon. A program title that deliberately
+  -- starts with a symbol keeps that symbol untouched.
   if title:byte(1) and title:byte(1) < 128 then
     return "\u{f489}", keep_start(title, room - 2)
   end
@@ -304,10 +331,11 @@ wezterm.on("format-tab-title", function(tab, tabs, panes, _, _, max_width)
 
   -- 2 before the name, 1 after the shortcut, 2 between them at the least.
   local room = width - 3 - wezterm.column_width(dot) - (shortcut ~= "" and wezterm.column_width(shortcut) + 2 or 0)
-  local icon, label, branch = tab_label(tab.tab_title, pane, math.max(room, 4))
+  local icon, label, branch, agent = tab_label(tab.tab_title, pane, math.max(room, 4))
   -- At very small widths, make room for the name before decoration.
   if width < 8 then
-    return { { Text = width > 0 and keep_start(dot .. label, width) or "" } }
+    local compact_icon = agent and icon ~= "" and (icon .. " ") or ""
+    return { { Text = width > 0 and keep_start(dot .. compact_icon .. label, width) or "" } }
   end
   icon = icon ~= "" and (icon .. " ") or ""
   branch = branch and ("  \u{f418} " .. branch) or ""
@@ -329,14 +357,21 @@ wezterm.on("format-tab-title", function(tab, tabs, panes, _, _, max_width)
   if needs_you then
     add(items, colored(attention_color, dot))
   end
+  local agent_color = agent == "claude" and theme.brights[2]
+    or agent == "codex" and theme.brights[6]
   if tab.is_active then
-    add(items, colored(theme.cursor or theme.accent, icon))
+    add(items, colored(agent_color or theme.cursor or theme.accent, icon))
     add(items, { Attribute = { Intensity = "Bold" } }, { Text = label }, "ResetAttributes")
     add(items, colored(theme.brights[3], branch))
     add(items, { Text = gap })
     add(items, colored(theme.muted, shortcut))
   else
-    add(items, { Text = icon .. label .. branch .. gap .. shortcut })
+    if agent_color and icon ~= "" then
+      add(items, colored(agent_color, icon))
+      add(items, { Text = label .. branch .. gap .. shortcut })
+    else
+      add(items, { Text = icon .. label .. branch .. gap .. shortcut })
+    end
   end
   add(items, { Text = " " })
   return items

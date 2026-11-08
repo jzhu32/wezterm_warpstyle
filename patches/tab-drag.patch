@@ -12,17 +12,17 @@ index ce9e392..22dea43 100644
  local act = wezterm.action
  
 diff --git a/wezterm-gui/src/termwindow/mod.rs b/wezterm-gui/src/termwindow/mod.rs
-index 27567d9..731b63b 100644
+index 27567d9..77f5436 100644
 --- a/wezterm-gui/src/termwindow/mod.rs
 +++ b/wezterm-gui/src/termwindow/mod.rs
-@@ -76,6 +76,7 @@ pub mod clipboard;
- pub mod keyevent;
- pub mod modal;
- mod mouseevent;
+@@ -83,6 +83,7 @@ pub mod render;
+ pub mod resize;
+ mod selection;
+ pub mod spawn;
 +mod tab_drag;
- pub mod palette;
- pub mod paneselect;
- mod prevcursor;
+ pub mod webgpu;
+ use crate::spawn::SpawnWhere;
+ use prevcursor::PrevCursorPos;
 @@ -444,6 +445,14 @@ pub struct TermWindow {
  
      ui_items: Vec<UIItem>,
@@ -58,16 +58,15 @@ index 27567d9..731b63b 100644
              is_click_to_focus_window: false,
              key_table_state: KeyTableState::default(),
 diff --git a/wezterm-gui/src/termwindow/mouseevent.rs b/wezterm-gui/src/termwindow/mouseevent.rs
-index f7fefd0..2960141 100644
+index f7fefd0..4da54ab 100644
 --- a/wezterm-gui/src/termwindow/mouseevent.rs
 +++ b/wezterm-gui/src/termwindow/mouseevent.rs
-@@ -1,4 +1,6 @@
- use crate::tabbar::TabBarItem;
-+use super::tab_drag::{tab_drag_has_started, tab_drag_target};
+@@ -1,3 +1,5 @@
 +use super::render::fancy_tab_bar::clone_tab_element;
++use super::tab_drag::{tab_drag_has_started, tab_drag_target};
+ use crate::tabbar::TabBarItem;
  use crate::termwindow::{
      GuiWin, MouseCapture, PositionedSplit, ScrollHit, TermWindowNotif, UIItem, UIItemType, TMB,
- };
 @@ -131,6 +133,9 @@ impl super::TermWindow {
                  }
                  if press == &MousePress::Left && self.dragging.take().is_some() {
@@ -78,7 +77,7 @@ index f7fefd0..2960141 100644
                      return;
                  }
              }
-@@ -332,6 +337,48 @@ impl super::TermWindow {
+@@ -332,6 +337,51 @@ impl super::TermWindow {
          self.dragging.replace((item, start_event));
      }
  
@@ -104,12 +103,15 @@ index f7fefd0..2960141 100644
 +        // the tab was grabbed at its left edge, center, or right edge.
 +        let dragged_left = event.coords.x - start_offset;
 +        let dragged_center = dragged_left + item.width as isize / 2;
-+        let bounds = self.ui_items.iter().filter_map(|item| match item.item_type {
-+            UIItemType::TabBar(TabBarItem::Tab { tab_idx, .. }) => {
-+                Some((tab_idx, item.x, item.width))
-+            }
-+            _ => None,
-+        });
++        let bounds = self
++            .ui_items
++            .iter()
++            .filter_map(|item| match item.item_type {
++                UIItemType::TabBar(TabBarItem::Tab { tab_idx, .. }) => {
++                    Some((tab_idx, item.x, item.width))
++                }
++                _ => None,
++            });
 +        let target = tab_drag_target(tab_idx, dragged_center, bounds);
 +        if target != tab_idx && self.move_tab(target).is_ok() {
 +            item.item_type = UIItemType::TabBar(TabBarItem::Tab {
@@ -127,7 +129,7 @@ index f7fefd0..2960141 100644
      fn drag_ui_item(
          &mut self,
          item: UIItem,
-@@ -348,6 +395,9 @@ impl super::TermWindow {
+@@ -348,6 +398,9 @@ impl super::TermWindow {
              UIItemType::ScrollThumb => {
                  self.drag_scroll_thumb(item, start_event, event, context);
              }
@@ -137,7 +139,7 @@ index f7fefd0..2960141 100644
              _ => {
                  log::error!("drag not implemented for {:?}", item);
              }
-@@ -364,8 +414,8 @@ impl super::TermWindow {
+@@ -364,8 +417,8 @@ impl super::TermWindow {
      ) {
          self.last_ui_item.replace(item.clone());
          match item.item_type {
@@ -148,7 +150,7 @@ index f7fefd0..2960141 100644
              }
              UIItemType::AboveScrollThumb => {
                  self.mouse_event_above_scroll_thumb(item, pane, event, context);
-@@ -455,14 +505,22 @@ impl super::TermWindow {
+@@ -455,14 +508,26 @@ impl super::TermWindow {
  
      pub fn mouse_event_tab_bar(
          &mut self,
@@ -162,18 +164,22 @@ index f7fefd0..2960141 100644
 -            WMEK::Press(MousePress::Left) => match item {
 +            WMEK::Press(MousePress::Left) => match tab_bar_item {
                  TabBarItem::Tab { tab_idx, .. } => {
-+                    self.dragging_tab_snapshot = self
-+                        .fancy_tab_bar
-+                        .as_ref()
-+                        .and_then(|bar| clone_tab_element(bar, tab_idx));
                      self.activate_tab(tab_idx as isize).ok();
++                    // Activating rebuilds the tab state. Capture from that new
++                    // state so dragging a formerly inactive tab keeps its
++                    // selected colors and full title instead of a grey copy.
++                    let palette = self.palette().clone();
++                    self.dragging_tab_snapshot = self
++                        .build_fancy_tab_bar(&palette)
++                        .ok()
++                        .and_then(|bar| clone_tab_element(&bar, tab_idx));
 +                    // For reordering tabs
 +                    self.dragging_tab_start_offset = Some(event.coords.x - item.x as isize);
 +                    self.dragging = Some((item, event));
                  }
                  TabBarItem::NewTabButton { .. } => {
                      self.do_new_tab_button_click(MousePress::Left);
-@@ -510,7 +568,7 @@ impl super::TermWindow {
+@@ -510,7 +575,7 @@ impl super::TermWindow {
                      }
                  }
              },
@@ -182,7 +188,7 @@ index f7fefd0..2960141 100644
                  TabBarItem::Tab { tab_idx, .. } => {
                      self.close_specific_tab(tab_idx, true);
                  }
-@@ -522,7 +580,7 @@ impl super::TermWindow {
+@@ -522,7 +587,7 @@ impl super::TermWindow {
                  | TabBarItem::RightStatus
                  | TabBarItem::WindowButton(_) => {}
              },
@@ -191,7 +197,7 @@ index f7fefd0..2960141 100644
                  TabBarItem::Tab { .. } => {
                      self.show_tab_navigator();
                  }
-@@ -534,7 +592,7 @@ impl super::TermWindow {
+@@ -534,7 +599,7 @@ impl super::TermWindow {
                  | TabBarItem::RightStatus
                  | TabBarItem::WindowButton(_) => {}
              },
@@ -314,10 +320,10 @@ index 2474e2d..a504cd7 100644
  fn make_x_button(
 diff --git a/wezterm-gui/src/termwindow/tab_drag.rs b/wezterm-gui/src/termwindow/tab_drag.rs
 new file mode 100644
-index 0000000..9a80122
+index 0000000..0fe50c9
 --- /dev/null
 +++ b/wezterm-gui/src/termwindow/tab_drag.rs
-@@ -0,0 +1,89 @@
+@@ -0,0 +1,91 @@
 +const DRAG_THRESHOLD: isize = 4;
 +
 +/// Ignore tiny pointer jitter so an ordinary click remains visually still.
@@ -334,7 +340,9 @@ index 0000000..9a80122
 +    bar_right: isize,
 +) -> isize {
 +    let rightmost = bar_right.saturating_sub(tab_width).max(bar_left);
-+    pointer_x.saturating_sub(grab_offset).clamp(bar_left, rightmost)
++    pointer_x
++        .saturating_sub(grab_offset)
++        .clamp(bar_left, rightmost)
 +}
 +
 +/// Cross neighboring tab midpoints using the dragged tab's center, including
