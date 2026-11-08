@@ -197,9 +197,12 @@ changed size in the meantime.
 Tabs share the bar evenly. Each shows its last two folders and git branch
 while the shell is waiting, or the running program's own title. Claude and
 Codex tabs show their real logos from Nerd Fonts 3.5.1: Claude in warm orange,
-Codex with the neutral OpenAI mark. Common tools such as Git, Python, Node,
-Docker, Vim and Neovim use their own icons too. A tab is
-tinted amber, and you get a notification, when Claude Code finishes or asks
+Codex with the OpenAI mark in white on dark themes and near-black on light.
+Tab accents follow each window's palette even after a config reload. Native
+tab controls, shortcuts, shell suggestions and welcome text also adapt to the
+theme with readable contrast. Common tools such as Git, Python, Node, Docker,
+Vim and Neovim use their own icons too. A tab gets an amber dot, and you get a
+notification, when Claude Code finishes or asks
 something while you are elsewhere, or when a command that ran longer than 30
 seconds ends. The tabs you had open come back the next time WezTerm starts.
 

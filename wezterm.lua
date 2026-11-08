@@ -29,7 +29,7 @@ local settings = {
 
 -- ---- Look -------------------------------------------------------------------
 
--- Colors copied from Warp's bundled themes.
+-- Based on Warp's bundled themes, with contrast adjustments for WezTerm.
 local themes = {
   ["Warp Phenomenon"] = {
     bg = "#121212",
@@ -43,12 +43,14 @@ local themes = {
     edge = "#2A2A2A",
     hover = "#1C1C1C",
     tint = "#3D2E00",
-    muted = "#8C8C8C",
-    claude = "#D97757",
+    muted = "#B3B3B3",
+    claude = "#E3997A",
+    branch = "#9DC3AC",
+    attention = "#FFB000",
     ansi = { "#121212", "#D22D1E", "#1CA05A", "#E5A01A", "#3780E9", "#BF409D", "#799C92", "#FAF9F6" },
     -- Warp lightens colors that are too close to the background; WezTerm does
     -- not, so bright black is a readable grey here instead of Warp's #292929.
-    brights = { "#6E6E6E", "#AE756F", "#789B88", "#BD9F65", "#6F839F", "#A57899", "#BFC5C3", "#FFFFFF" },
+    brights = { "#909090", "#AE756F", "#789B88", "#BD9F65", "#6F839F", "#A57899", "#BFC5C3", "#FFFFFF" },
   },
   ["Warp Dark"] = {
     bg = "#050505",
@@ -61,8 +63,10 @@ local themes = {
     edge = "#1F1F1F",
     hover = "#141414",
     tint = "#3D2E00",
-    muted = "#8E8E8E",
-    claude = "#D97757",
+    muted = "#A9A9A9",
+    claude = "#E3997A",
+    branch = "#D6FCB9",
+    attention = "#FFB000",
     ansi = { "#616161", "#FF8272", "#B4FA72", "#FEFDC2", "#A5D5FE", "#FF8FFD", "#D0D1FE", "#F1F1F1" },
     brights = { "#8E8E8E", "#FFC4BD", "#D6FCB9", "#FEFDD5", "#C1E3FE", "#FFB1FE", "#E5E6FE", "#FEFFFF" },
   },
@@ -70,6 +74,7 @@ local themes = {
     bg = "#FFFFFF",
     fg = "#111111",
     accent = "#00C2FF",
+    cursor = "#007C9E",
     selection = "#B3EDFF",
     chrome = "#F0F0F0",
     tab = "#FFFFFF",
@@ -79,8 +84,10 @@ local themes = {
     tint = "#FFF1CC",
     muted = "#6B6B6B",
     claude = "#A8472D",
+    branch = "#267045",
+    attention = "#925800",
     ansi = { "#212121", "#C30771", "#10A778", "#A89C14", "#008EC4", "#523C79", "#20A5BA", "#E0E0E0" },
-    brights = { "#212121", "#FB007A", "#5FD7AF", "#F3E430", "#20BBFC", "#6855DE", "#4FB8CC", "#F1F1F1" },
+    brights = { "#6B6B6B", "#FB007A", "#5FD7AF", "#F3E430", "#20BBFC", "#6855DE", "#4FB8CC", "#F1F1F1" },
   },
 }
 
@@ -120,6 +127,8 @@ local theme_name = system_is_dark() and settings.dark_theme or settings.light_th
 local theme = themes[theme_name] or themes["Warp Phenomenon"]
 
 config.color_scheme = theme_name
+-- The native tab controls read colors.tab_bar directly, rather than the named palette.
+config.colors = { tab_bar = config.color_schemes[theme_name].tab_bar }
 config.font = wezterm.font_with_fallback({ settings.font, "Menlo" })
 config.font_size = settings.font_size
 config.line_height = settings.line_height
@@ -171,6 +180,8 @@ config.window_frame = {
   font_size = settings.tab_font_size,
   active_titlebar_bg = theme.chrome,
   inactive_titlebar_bg = theme.chrome,
+  active_titlebar_fg = theme.fg,
+  inactive_titlebar_fg = theme.muted,
 }
 config.tab_max_width = 48
 config.command_palette_bg_color = theme.tab
@@ -180,7 +191,6 @@ config.command_palette_font_size = 15.0
 local shells = { zsh = true, bash = true, fish = true, sh = true }
 
 -- Tabs that rang the bell while you were looking elsewhere (see Attention).
-local attention_color = "#FFB000"
 local function attention_key(pane_id)
   return "attention_" .. tostring(pane_id)
 end
@@ -328,8 +338,10 @@ local function tab_width(tab_count, panes)
 end
 
 -- Every tab is the same width: name on the left, shortcut on the right. The
--- tab in front gets color; one that rang the bell is tinted until you look.
-wezterm.on("format-tab-title", function(tab, tabs, panes, _, _, max_width)
+-- tab in front gets color; one that rang the bell gets a dot until you look.
+wezterm.on("format-tab-title", function(tab, tabs, panes, effective_config, _, max_width)
+  -- Lua can be reloaded in light mode while this window still uses a dark palette.
+  local tab_theme = (effective_config and themes[effective_config.color_scheme]) or theme
   local pane = tab.active_pane
   local width = math.max(0, math.min(tab_width(tabs and #tabs or 1, panes), max_width))
   local number = tab.tab_index < 8 and tab.tab_index + 1
@@ -366,20 +378,20 @@ wezterm.on("format-tab-title", function(tab, tabs, panes, _, _, max_width)
     end
   end
 
-  -- The first character sets the color of the whole tab.
+  -- Leave the first character uncolored so native active and hover styles apply.
   local items = {}
   add(items, { Text = "  " }, "ResetAttributes")
   if needs_you then
-    add(items, colored(attention_color, dot))
+    add(items, colored(tab_theme.attention, dot))
   end
-  local agent_color = agent == "claude" and theme.claude
-    or agent == "codex" and theme.fg
+  local agent_color = agent == "claude" and tab_theme.claude
+    or agent == "codex" and tab_theme.fg
   if tab.is_active then
-    add(items, colored(agent_color or theme.cursor or theme.accent, icon))
+    add(items, colored(agent_color or tab_theme.cursor or tab_theme.accent, icon))
     add(items, { Attribute = { Intensity = "Bold" } }, { Text = label }, "ResetAttributes")
-    add(items, colored(theme.brights[3], branch))
+    add(items, colored(tab_theme.branch, branch))
     add(items, { Text = gap })
-    add(items, colored(theme.muted, shortcut))
+    add(items, colored(tab_theme.muted, shortcut))
   else
     if agent_color and icon ~= "" then
       add(items, colored(agent_color, icon))
@@ -626,8 +638,9 @@ wezterm.on("update-status", function(window)
   local selection = pending[window:active_key_table()]
   local hint = ""
   if selection then
+    local status_theme = themes[window:effective_config().color_scheme] or theme
     hint = wezterm.format({
-      { Foreground = { Color = theme.cursor or theme.accent } },
+      { Foreground = { Color = status_theme.cursor or status_theme.accent } },
       { Text = selection.hint .. " · ⌫ deletes · esc cancels   " },
     })
   end

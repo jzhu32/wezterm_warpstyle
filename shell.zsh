@@ -167,7 +167,7 @@ _wz_rule=$'%F{238}%{\e[9m${(l:COLUMNS-1:: :):-}\e[29m%}%f'
 # its row even when the cursor is not where zsh believes: see _wz_nudge.
 _wz_mark_prompt=$'%{\r\e]133;P;k=i\a%}'
 _wz_mark_input=$'%{\e]133;B\a%}'
-_wz_prompt_compact=$_wz_mark_prompt$_wz_rule$'\n''%F{244}${_wz_p_env:+$_wz_p_env }%~${_wz_p_branch:+ git:($_wz_p_branch)}%f'$'\n'$_wz_mark_input
+_wz_prompt_compact=$_wz_mark_prompt$_wz_rule$'\n''%F{8}${_wz_p_env:+$_wz_p_env }%~${_wz_p_branch:+ git:($_wz_p_branch)}%f'$'\n'$_wz_mark_input
 
 # How long the last command ran, shown once it is worth knowing. A long one
 # also rings the bell, which wezterm.lua turns into a mark on the tab and a
@@ -212,7 +212,7 @@ _wz_prompt_precmd() {
   # The chips never run onto a second row: whatever still does not fit is cut
   # off. A prompt that changed height with the width of the window would be
   # redrawn in the wrong place by zsh, which has no idea the terminal rewraps.
-  PROMPT=$_wz_mark_prompt$_wz_rule$'\n''%-2>…>%(130?..%(?..'$failed'))'$_wz_chips'%F{244}${_wz_p_took:+took $_wz_p_took}%f%<<%b%k%f'$_wz_link_end$'\n\n'$_wz_mark_input
+  PROMPT=$_wz_mark_prompt$_wz_rule$'\n''%-2>…>%(130?..%(?..'$failed'))'$_wz_chips'%F{8}${_wz_p_took:+took $_wz_p_took}%f%<<%b%k%f'$_wz_link_end$'\n\n'$_wz_mark_input
 }
 
 # An empty row above every prompt, like the spacing between Warp's blocks. The
@@ -461,9 +461,8 @@ bindkey '^[[997~' _wz_pick-folder
 
 _wz_share=${HOMEBREW_PREFIX:-/opt/homebrew}/share
 
-# Grey rather than the default "bright black", which Warp's themes make nearly
-# the same color as the background.
-ZSH_AUTOSUGGEST_HIGHLIGHT_STYLE='fg=244'
+# Palette gray follows the theme; wezterm.lua keeps it readable in light and dark.
+ZSH_AUTOSUGGEST_HIGHLIGHT_STYLE='fg=8'
 if [[ -r $_wz_share/zsh-autosuggestions/zsh-autosuggestions.zsh ]]; then
   source $_wz_share/zsh-autosuggestions/zsh-autosuggestions.zsh
   ZSH_AUTOSUGGEST_CLEAR_WIDGETS+=(_wz_up _wz_down)
@@ -472,7 +471,7 @@ fi
 # Has to come after every widget above is defined.
 if [[ -r $_wz_share/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh ]]; then
   source $_wz_share/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh
-  ZSH_HIGHLIGHT_STYLES[comment]='fg=244'
+  ZSH_HIGHLIGHT_STYLES[comment]='fg=8'
   for _wz_style in command builtin alias function precommand; do
     ZSH_HIGHLIGHT_STYLES[$_wz_style]='fg=green,bold'
   done
@@ -497,7 +496,7 @@ _wz_welcome() {
     '⇧ ⌘ G' 'folders here'
     '⌘ P'   'all commands'
   )
-  print -P '\n %B%F{15}  New terminal session%f%b\n'
+  print -P '\n %f%B  New terminal session%b\n'
   # A chip fills its row from top to bottom, so chips on neighbouring rows run
   # into one another. A hairline along the top of each but the first, in the
   # color of the window behind them, reads as a small gap. It is an overline.
@@ -518,7 +517,7 @@ _wz_welcome() {
   for keys text in $notes; do
     line=
     (( row++ )) && line=$gap
-    print -P -- "${(l:6-$#keys:: :):-}"$'%F{236}'$line$'%K{236}%F{252} '$keys' '${line:+$ungap}$'%k%F{236}%f  %F{244}'$text'%f'
+    print -P -- "${(l:6-$#keys:: :):-}"$'%F{236}'$line$'%K{236}%F{252} '$keys' '${line:+$ungap}$'%k%F{236}%f  %F{8}'$text'%f'
   done
 }
 

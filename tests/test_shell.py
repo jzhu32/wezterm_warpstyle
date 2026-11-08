@@ -257,7 +257,7 @@ send("false\r", 0.8)
 shown = bytes(out[before:]).decode("utf-8", "replace")
 check("failed command shows a red mark with its status", "✘ 1" in shown, True)
 check("prompt has the folder chip", "  ~" in shown, True)
-check("entered command collapses to the compact header", "\x1b[38;5;244m" in shown and "~" in shown, True)
+check("entered command collapses to a compact header in theme gray", "\x1b[90m" in shown and "~" in shown, True)
 check("prompt and input are marked for the terminal", "\x1b]133;P;k=i\x07" in shown and "\x1b]133;B\x07" in shown, True)
 check("tab title is set to the command while it runs", "\x1b]0;false\x07" in shown, True)
 check("program name is reported for the tab", "SetUserVar=WEZ_CMD=ZmFsc2U=" in shown, True)
@@ -526,6 +526,8 @@ def loaded_again(before=""):
     send(" " + before + "source '" + os.path.join(REPO, "shell.zsh") + "'\r", 2.0)
     return bytes(out[seen:]).count(NOTE)
 check("a new pane opens with a short list of shortcuts", (startup.count(NOTE), "⌘".encode() in startup, b"folders here" in startup, b"all commands" in startup), (1, True, True, True))
+check("  ...with a heading that follows the theme and readable palette gray for descriptions",
+      (b"\x1b[39m\x1b[1m" + "  ".encode() + NOTE in startup, b"\x1b[90mask Claude for the command" in startup, b"\x1b[90mall commands" in startup), (True, True, True))
 # Chips on neighbouring rows touch, so each but the first has a hairline along
 # its top in the window's color: an overline, colored like an underline.
 # wezterm.lua names two colors, and the system's setting says which it is.

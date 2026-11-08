@@ -38,6 +38,7 @@ end
 
 -- Stand-ins for the parts of WezTerm the newer features talk to.
 local GLOBAL, globbed, pgrep_output, mux = {}, {}, "100\n", { windows = {}, calls = {} }
+local formatted
 local decoded = {}
 local function encode(v)
   if type(v) ~= "table" then
@@ -99,7 +100,7 @@ local function load_config(appearance)
     column_width = function(text) return #chars(text) end,
     truncate_right = function(text, n) return table.concat(chars(text), "", 1, math.min(n, #chars(text))) end,
     truncate_left = function(text, n) local c = chars(text); return table.concat(c, "", math.max(#c - n + 1, 1), #c) end,
-    format = flatten,
+    format = function(items) formatted = items; return flatten(items) end,
     sleep_ms = function(ms) slept = (slept or 0) + ms end,
     GLOBAL = GLOBAL,
     glob = function(pattern) return globbed[pattern] or {} end,
@@ -134,6 +135,7 @@ local function window(selection, key_table, opts)
   end
   function w:copy_to_clipboard(text) self.clipboard = text end
   function w:active_key_table() return key_table end
+  function w:effective_config() return { color_scheme = opts.color_scheme or "Warp Dark" } end
   function w:set_right_status(text) self.status = text end
   return w
 end
@@ -344,16 +346,83 @@ local function colors_of(items)
   end
   return table.concat(found, " ")
 end
-check("the tab in front is colored: icon, branch, shortcut", colors_of(tab_items(0, true, shell_tab)), "#19AAD8 #D6FCB9 #8E8E8E")
+check("the tab in front is colored: icon, branch, shortcut", colors_of(tab_items(0, true, shell_tab)), "#19AAD8 #D6FCB9 #A9A9A9")
 check("ordinary inactive tabs are left plain", colors_of(tab_items(0, false, shell_tab)), "")
-check("inactive Claude tabs keep their identifying color", colors_of(tab_items(0, false, claude_tab)), "#D97757")
+check("inactive Claude tabs keep their identifying color", colors_of(tab_items(0, false, claude_tab)), "#E3997A")
 check("Codex uses a neutral OpenAI logo",
   colors_of(tab_items(0, false, { foreground_process_name = "/opt/homebrew/bin/codex", title = "Codex", user_vars = { WEZ_ZLE = "0" } })), "#FFFFFF")
-local _, light_events = load_config("Light")
+local light_config, light_events = load_config("Light")
 local light_agent = light_events["format-tab-title"](
   { tab_title = "", tab_index = 0, is_active = false, active_pane = claude_tab },
   { {} }, { { left = 0, width = 116 } }, nil, nil, 48)
 check("the Claude mark remains distinct in the light theme", colors_of(light_agent), "#A8472D")
+local codex_tab = { tab_title = "", tab_index = 0, is_active = true,
+  active_pane = { foreground_process_name = "/opt/homebrew/bin/codex", title = "Codex", user_vars = { WEZ_ZLE = "0" } } }
+local dark_window_from_light_lua = light_events["format-tab-title"](
+  codex_tab, { codex_tab }, { { left = 0, width = 116 } }, { color_scheme = "Warp Dark" }, false, 48)
+check("a dark window keeps a white logo even after another Lua context loads light mode",
+  colors_of(dark_window_from_light_lua):find("#FFFFFF", 1, true) ~= nil, true)
+local light_window_from_dark_lua = title(
+  codex_tab, { codex_tab }, { { left = 0, width = 116 } }, { color_scheme = "Warp Light" }, false, 48)
+check("a light window keeps a dark logo after a dark-mode Lua reload",
+  colors_of(light_window_from_dark_lua):find("#111111", 1, true) ~= nil, true)
+light_events["update-status"](window("", "select_all"))
+check("selection hints also follow a dark window after a light-mode reload", colors_of(formatted), "#19AAD8")
+events["update-status"](window("", "select_all", { color_scheme = "Warp Light" }))
+check("selection hints also follow a light window after a dark-mode reload", colors_of(formatted), "#007C9E")
+for _, c in ipairs({ config, light_config }) do
+  check("native tab and new-tab controls receive the selected palette: " .. c.color_scheme,
+    encode(c.colors.tab_bar), encode(c.color_schemes[c.color_scheme].tab_bar))
+end
+
+local function luminance(hex)
+  local rgb = {}
+  for component in hex:gmatch("%x%x") do
+    local s = tonumber(component, 16) / 255
+    rgb[#rgb + 1] = s <= 0.04045 and s / 12.92 or ((s + 0.055) / 1.055) ^ 2.4
+  end
+  return 0.2126 * rgb[1] + 0.7152 * rgb[2] + 0.0722 * rgb[3]
+end
+local function contrast(a, b)
+  a, b = luminance(a), luminance(b)
+  return (math.max(a, b) + 0.05) / (math.min(a, b) + 0.05)
+end
+-- Native hover styles are inherited after ResetAttributes. Test the actual
+-- foreground runs, including the agent mark, branch, shortcut and attention dot.
+codex_tab.active_pane.pane_id = 77
+GLOBAL.attention_77 = true
+for name, palette in pairs(config.color_schemes) do
+  local failures = {}
+  for _, state in ipairs({ "active_tab", "inactive_tab", "inactive_tab_hover" }) do
+    local style = palette.tab_bar[state]
+    for _, p in ipairs({ shell_tab, claude_tab, codex_tab.active_pane }) do
+      for _, width in ipairs({ 7, 48 }) do
+        local items = light_events["format-tab-title"](
+          { tab_title = "", tab_index = 0, is_active = state == "active_tab", active_pane = p },
+          { {} }, { { left = 0, width = 116 } }, { color_scheme = name }, state == "inactive_tab_hover", width)
+        local fg, bg = style.fg_color, style.bg_color
+        for _, item in ipairs(items) do
+          if item == "ResetAttributes" then
+            fg, bg = style.fg_color, style.bg_color
+          elseif item.Foreground then
+            fg = item.Foreground.Color
+          elseif item.Background then
+            bg = item.Background.Color
+          elseif item.Text and item.Text:find("%S") then
+            local minimum = item.Text:find("%w") and 4.5 or 3.0
+            if contrast(fg, bg) < minimum then
+              failures[#failures + 1] = state .. ": " .. item.Text
+            end
+          end
+        end
+      end
+    end
+  end
+  check("tab text and icons have readable contrast in every state: " .. name, table.concat(failures, ", "), "")
+  check("welcome descriptions have readable contrast: " .. name,
+    contrast(palette.brights[1], palette.background) >= 4.5, true)
+end
+GLOBAL.attention_77 = nil
 
 -- WezTerm drops the whole title and falls back to "3: name" if one item is not
 -- a FormatItem it knows, so check the shape of every one rather than the text.
@@ -389,7 +458,7 @@ check("bell from a tab you are not on marks it", GLOBAL.attention_7, true)
 check("  ...and raises a notification naming it", w.toasts[1], "✳ Fix the login bug needs you")
 local flagged = { pane_id = 7, foreground_process_name = CLAUDE, title = "✳ Fix the login bug", user_vars = { WEZ_ZLE = "0" } }
 check("  ...and its tab gets a dot", squeeze(tab(1, false, flagged)), "  ● \u{ec82} Fix the login bug  ⌘2 ")
-check("  ...colors only the attention dot and agent mark", colors_of(tab_items(1, false, flagged)), "#FFB000 #D97757")
+check("  ...colors only the attention dot and agent mark", colors_of(tab_items(1, false, flagged)), "#FFB000 #E3997A")
 check("  ...with items WezTerm knows", badly_shaped(tab_items(1, false, flagged)), "")
 check("  ...but not while it is the tab in front", squeeze(tab(1, true, flagged)), "  \u{ec82} Fix the login bug  ⌘2 ")
 w = window("", nil, { active = claude_pane })
