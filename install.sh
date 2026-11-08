@@ -21,6 +21,8 @@ if [[ $1 != --no-brew ]]; then
   # Keep unrelated packages as they are; the pinned WezTerm is built below.
   HOMEBREW_NO_INSTALLED_DEPENDENTS_CHECK=1 HOMEBREW_NO_INSTALL_CLEANUP=1 \
     brew bundle --file=$repo/Brewfile --no-upgrade
+  # The tab logos require the current Codicons glyphs in Nerd Fonts 3.5.1+.
+  brew upgrade --cask font-hack-nerd-font
   "$repo/build-wezterm.sh" --install
 fi
 

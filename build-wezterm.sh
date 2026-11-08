@@ -39,6 +39,7 @@ if [[ ! -r $built_app/$marker || $(<$built_app/$marker) != $stamp ]]; then
     cd "$source_dir"
     export CARGO_TARGET_DIR=$build/target OPENSSL_DIR=$openssl_dir OPENSSL_STATIC=1 LIBGIT2_NO_PKG_CONFIG=1
     print -r -- '20261026-082628-e68a8ec2-warpstyle-tab-drag' > .tag
+    cargo test --locked --release -p mux --lib tab_drag_detach -- --test-threads=1
     cargo test --locked --release -p wezterm-gui --bin wezterm-gui tab_drag
     cargo build --locked --release -p wezterm-gui -p wezterm -p wezterm-mux-server -p strip-ansi-escapes
   )

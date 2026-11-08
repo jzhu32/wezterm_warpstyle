@@ -11,6 +11,138 @@ index ce9e392..22dea43 100644
  ```lua
  local act = wezterm.action
  
+diff --git a/lua-api-crates/mux/src/tab.rs b/lua-api-crates/mux/src/tab.rs
+index 522166d..907a9db 100644
+--- a/lua-api-crates/mux/src/tab.rs
++++ b/lua-api-crates/mux/src/tab.rs
+@@ -23,6 +23,12 @@ impl UserData for MuxTab {
+             }))
+         });
+         methods.add_method("tab_id", |_, this, _: ()| Ok(this.0));
++        methods.add_method("move_to_new_window", |_, this, _: ()| {
++            let mux = get_mux()?;
++            let window_id = mux.move_tab_to_new_window(this.0, None)
++                .map_err(mlua::Error::external)?;
++            Ok((*this, MuxWindow(window_id)))
++        });
+         methods.add_method("window", |_, this, _: ()| {
+             let mux = get_mux()?;
+             for window_id in mux.iter_windows() {
+diff --git a/mux/src/lib.rs b/mux/src/lib.rs
+index 6d1a746..ffd013b 100644
+--- a/mux/src/lib.rs
++++ b/mux/src/lib.rs
+@@ -1013,6 +1013,36 @@ impl Mux {
+         Ok(())
+     }
+ 
++    /// Move the existing tab and its complete pane layout without restarting anything.
++    pub fn move_tab_to_new_window(
++        &self,
++        tab_id: TabId,
++        position: Option<GuiPosition>,
++    ) -> anyhow::Result<WindowId> {
++        let source_id = self.window_containing_tab(tab_id)
++            .ok_or_else(|| anyhow!("tab {tab_id} is not in a window"))?;
++        let workspace = self.get_window(source_id)
++            .ok_or_else(|| anyhow!("source window disappeared"))?
++            .get_workspace().to_string();
++        let destination = self.new_empty_window(Some(workspace), position);
++        let destination_id = *destination;
++        {
++            let mut windows = self.windows.write();
++            let source = windows.get_mut(&source_id)
++                .ok_or_else(|| anyhow!("source window disappeared"))?;
++            let index = source.get_tab_idx_for_id(tab_id)
++                .ok_or_else(|| anyhow!("tab {tab_id} disappeared"))?;
++            let tab = source.remove_tab_idx(index);
++            // The builder keeps this new window alive throughout the transfer.
++            windows.get_mut(&destination_id).unwrap().push_tab(&tab);
++        }
++        self.recompute_pane_count();
++        self.notify(MuxNotification::TabAddedToWindow { tab_id, window_id: destination_id });
++        drop(destination);
++        self.prune_dead_windows();
++        Ok(destination_id)
++    }
++
+     /// Returns the ID of the window containing the given tab ID, if any.
+     pub fn window_containing_tab(&self, tab_id: TabId) -> Option<WindowId> {
+         for w in self.windows.read().values() {
+diff --git a/mux/src/tab.rs b/mux/src/tab.rs
+index e100bdb..79395ad 100644
+--- a/mux/src/tab.rs
++++ b/mux/src/tab.rs
+@@ -2316,6 +2316,69 @@ mod test {
+         }
+     }
+ 
++    #[test]
++    fn tab_drag_detach_preserves_the_whole_tab_and_other_windows() {
++        let mut cfg = config::Config::default();
++        cfg.mux_enable_ssh_agent = false;
++        config::use_this_configuration(cfg);
++        promise::spawn::set_schedulers(Box::new(|_| {}), Box::new(|_| {}));
++        let size = TerminalSize { rows: 24, cols: 80, pixel_width: 800, pixel_height: 600, dpi: 96 };
++        let tab = Arc::new(Tab::new(&size));
++        tab.assign_pane(&FakePane::new(1, size));
++        tab.split_and_insert(0, SplitRequest {
++            direction: SplitDirection::Horizontal, ..Default::default()
++        }, FakePane::new(2, size)).unwrap();
++        tab.set_title("running work");
++        let layout = |tab: &Tab| tab.iter_panes().iter().map(|p|
++            (p.pane.pane_id(), p.left, p.top, p.width, p.height)
++        ).collect::<Vec<_>>();
++        let original_layout = layout(&tab);
++        let other = Arc::new(Tab::new(&size));
++        other.assign_pane(&FakePane::new(3, size));
++
++        let mux = Arc::new(Mux::new(None));
++        Mux::set_mux(&mux);
++        // Register in-memory panes without starting the real PTY reader threads.
++        for pane in tab.iter_panes().into_iter().chain(other.iter_panes()) {
++            mux.panes.write().insert(pane.pane.pane_id(), Arc::clone(&pane.pane));
++        }
++        let source = mux.new_empty_window(Some("work".to_string()), None);
++        let source_id = *source;
++        mux.add_tab_no_panes(&tab);
++        mux.add_tab_no_panes(&other);
++        mux.add_tab_to_window(&tab, source_id).unwrap();
++        mux.add_tab_to_window(&other, source_id).unwrap();
++        drop(source);
++
++        let position = config::GuiPosition {
++            x: config::Dimension::Pixels(320.), y: config::Dimension::Pixels(180.),
++            origin: config::GeometryOrigin::ScreenCoordinateSystem,
++        };
++        let destination = mux.move_tab_to_new_window(tab.tab_id(), Some(position.clone())).unwrap();
++        let moved = mux.get_active_tab_for_window(destination).unwrap();
++        assert!(Arc::ptr_eq(&tab, &moved));
++        assert_eq!(moved.get_title(), "running work");
++        assert_eq!(layout(&moved), original_layout);
++        assert_eq!(moved.iter_panes().len(), 2);
++        for pane in moved.iter_panes() {
++            assert!(Arc::ptr_eq(&pane.pane, &mux.get_pane(pane.pane.pane_id()).unwrap()));
++        }
++        assert_eq!(mux.get_window(destination).unwrap().get_workspace(), "work");
++        assert_eq!(mux.get_window(destination).unwrap().get_initial_position(), &Some(position));
++        assert_eq!(mux.get_window(source_id).unwrap().count_tabs(), 1);
++        assert_eq!(mux.get_active_tab_for_window(source_id).unwrap().tab_id(), other.tab_id());
++
++        let second = mux.move_tab_to_new_window(other.tab_id(), None).unwrap();
++        assert!(mux.get_window(source_id).is_none());
++        assert!(Arc::ptr_eq(&mux.get_active_tab_for_window(second).unwrap(), &other));
++        assert!(Arc::ptr_eq(&mux.get_active_tab_for_window(destination).unwrap(), &tab));
++        assert!(!mux.is_empty());
++        let count = mux.iter_windows().len();
++        assert!(mux.move_tab_to_new_window(usize::MAX, None).is_err());
++        assert_eq!(mux.iter_windows().len(), count);
++        Mux::shutdown();
++    }
++
+     #[test]
+     fn tab_splitting() {
+         let size = TerminalSize {
 diff --git a/wezterm-gui/src/termwindow/box_model.rs b/wezterm-gui/src/termwindow/box_model.rs
 index 9edfe33..cb547dd 100644
 --- a/wezterm-gui/src/termwindow/box_model.rs
@@ -57,8 +189,29 @@ index 9edfe33..cb547dd 100644
                  }
              }
              ComputedElementContent::Poly { poly, line_width } => {
+diff --git a/wezterm-gui/src/termwindow/keyevent.rs b/wezterm-gui/src/termwindow/keyevent.rs
+index d669080..c39b612 100644
+--- a/wezterm-gui/src/termwindow/keyevent.rs
++++ b/wezterm-gui/src/termwindow/keyevent.rs
+@@ -597,6 +597,16 @@ impl super::TermWindow {
+     }
+ 
+     pub fn key_event_impl(&mut self, window_key: KeyEvent, context: &dyn WindowOps) {
++        if self.dragging_tab_id.is_some() && window_key.key_is_down
++            && window_key.key == ::window::KeyCode::Char('\u{1b}') {
++            self.dragging = None;
++            self.dragging_tab_id = None;
++            self.dragging_tab_grab_offset = None;
++            self.dragging_tab_snapshot = None;
++            context.set_cursor(Some(::window::CursorIcon::Default));
++            context.invalidate();
++            return;
++        }
+         let pane = match self.get_active_pane_or_overlay() {
+             Some(pane) => pane,
+             None => return,
 diff --git a/wezterm-gui/src/termwindow/mod.rs b/wezterm-gui/src/termwindow/mod.rs
-index 27567d9..77f5436 100644
+index 27567d9..9b5da62 100644
 --- a/wezterm-gui/src/termwindow/mod.rs
 +++ b/wezterm-gui/src/termwindow/mod.rs
 @@ -83,6 +83,7 @@ pub mod render;
@@ -69,14 +222,15 @@ index 27567d9..77f5436 100644
  pub mod webgpu;
  use crate::spawn::SpawnWhere;
  use prevcursor::PrevCursorPos;
-@@ -444,6 +445,14 @@ pub struct TermWindow {
+@@ -444,6 +445,15 @@ pub struct TermWindow {
  
      ui_items: Vec<UIItem>,
      dragging: Option<(UIItem, MouseEvent)>,
 +    /// Pixel offset from the dragged tab's left edge to the mouse cursor,
 +    /// captured at the start of a tab-bar drag so the floating preview
 +    /// tracks the cursor without snapping.
-+    dragging_tab_start_offset: Option<isize>,
++    dragging_tab_grab_offset: Option<(isize, isize)>,
++    dragging_tab_id: Option<TabId>,
 +    /// Stable visual captured when a tab drag begins. Keeping this separate
 +    /// from the live tab bar means the label cannot change or disappear while
 +    /// the underlying tab order is being updated.
@@ -84,46 +238,73 @@ index 27567d9..77f5436 100644
  
      modal: RefCell<Option<Rc<dyn Modal>>>,
  
-@@ -533,6 +542,9 @@ impl TermWindow {
+@@ -533,6 +543,10 @@ impl TermWindow {
          self.load_os_parameters();
  
          if self.focused.is_none() {
 +            self.dragging = None;
-+            self.dragging_tab_start_offset = None;
++            self.dragging_tab_grab_offset = None;
++            self.dragging_tab_id = None;
 +            self.dragging_tab_snapshot = None;
              self.last_mouse_click = None;
              self.current_mouse_buttons.clear();
              self.current_mouse_capture = None;
-@@ -788,6 +800,8 @@ impl TermWindow {
+@@ -788,6 +802,9 @@ impl TermWindow {
              semantic_zones: HashMap::new(),
              ui_items: vec![],
              dragging: None,
-+            dragging_tab_start_offset: None,
++            dragging_tab_grab_offset: None,
++            dragging_tab_id: None,
 +            dragging_tab_snapshot: None,
              last_ui_item: None,
              is_click_to_focus_window: false,
              key_table_state: KeyTableState::default(),
 diff --git a/wezterm-gui/src/termwindow/mouseevent.rs b/wezterm-gui/src/termwindow/mouseevent.rs
-index f7fefd0..2da5864 100644
+index f7fefd0..0c8fcc1 100644
 --- a/wezterm-gui/src/termwindow/mouseevent.rs
 +++ b/wezterm-gui/src/termwindow/mouseevent.rs
 @@ -1,3 +1,5 @@
 +use super::render::fancy_tab_bar::clone_tab_element;
-+use super::tab_drag::{tab_drag_has_started, tab_drag_target};
++use super::tab_drag::{tab_drag_has_started, tab_drag_should_detach, tab_drag_target};
  use crate::tabbar::TabBarItem;
  use crate::termwindow::{
      GuiWin, MouseCapture, PositionedSplit, ScrollHit, TermWindowNotif, UIItem, UIItemType, TMB,
-@@ -131,6 +133,9 @@ impl super::TermWindow {
-                 }
-                 if press == &MousePress::Left && self.dragging.take().is_some() {
-                     // Completed a drag
-+                    self.dragging_tab_start_offset = None;
-+                    self.dragging_tab_snapshot = None;
-+                    context.invalidate();
+@@ -129,9 +131,31 @@ impl super::TermWindow {
+                     // Completed a window drag
                      return;
                  }
+-                if press == &MousePress::Left && self.dragging.take().is_some() {
+-                    // Completed a drag
+-                    return;
++                if press == &MousePress::Left {
++                    if let Some((item, _)) = self.dragging.take() {
++                        let tab_id = self.dragging_tab_id.take();
++                        let grab = self.dragging_tab_grab_offset.take();
++                        self.dragging_tab_snapshot = None;
++                        if let (Some(tab_id), Some((grab_x, grab_y))) = (tab_id, grab) {
++                            if tab_drag_should_detach(event.coords.y, item.y as isize, item.height as isize) {
++                                let tabs_left = self.ui_items.iter().filter_map(|item| match item.item_type {
++                                    UIItemType::TabBar(TabBarItem::Tab { .. }) => Some(item.x as isize),
++                                    _ => None,
++                                }).min().unwrap_or(item.x as isize);
++                                let position = config::GuiPosition {
++                                    x: config::Dimension::Pixels((event.screen_coords.x - grab_x - tabs_left) as f32),
++                                    y: config::Dimension::Pixels((event.screen_coords.y - grab_y - item.y as isize) as f32),
++                                    origin: config::GeometryOrigin::ScreenCoordinateSystem,
++                                };
++                                if let Err(err) = Mux::get().move_tab_to_new_window(tab_id, Some(position)) {
++                                    log::error!("unable to detach tab: {err:#}");
++                                }
++                            }
++                        }
++                        context.set_cursor(Some(CursorIcon::Default));
++                        context.invalidate();
++                        return;
++                    }
+                 }
              }
-@@ -332,6 +337,60 @@ impl super::TermWindow {
+ 
+@@ -332,6 +356,69 @@ impl super::TermWindow {
          self.dragging.replace((item, start_event));
      }
  
@@ -134,11 +315,12 @@ index f7fefd0..2da5864 100644
 +        event: MouseEvent,
 +        context: &dyn WindowOps,
 +    ) {
-+        let start_offset = self
-+            .dragging_tab_start_offset
-+            .unwrap_or(item.width as isize / 2);
++        let (start_offset, start_offset_y) = self
++            .dragging_tab_grab_offset
++            .unwrap_or((item.width as isize / 2, item.height as isize / 2));
 +        let start_x = item.x as isize + start_offset;
-+        if !tab_drag_has_started(start_x, event.coords.x, self.dragging_tab_snapshot.is_some()) {
++        let start_y = item.y as isize + start_offset_y;
++        if !tab_drag_has_started((start_x, start_y), (event.coords.x, event.coords.y), self.dragging_tab_snapshot.is_some()) {
 +            self.dragging.replace((item, event));
 +            return;
 +        }
@@ -152,6 +334,14 @@ index f7fefd0..2da5864 100644
 +                        .and_then(|bar| clone_tab_element(&bar, tab_idx))
 +                });
 +        }
++
++        if tab_drag_should_detach(event.coords.y, item.y as isize, item.height as isize) {
++            context.set_cursor(Some(CursorIcon::Move));
++            self.dragging.replace((item, event));
++            context.invalidate();
++            return;
++        }
++        context.set_cursor(Some(CursorIcon::Default));
 +
 +        // Compare neighboring midpoints with the center of the floating tab,
 +        // not with the pointer. This makes the swap point identical whether
@@ -184,7 +374,7 @@ index f7fefd0..2da5864 100644
      fn drag_ui_item(
          &mut self,
          item: UIItem,
-@@ -348,6 +407,9 @@ impl super::TermWindow {
+@@ -348,6 +435,9 @@ impl super::TermWindow {
              UIItemType::ScrollThumb => {
                  self.drag_scroll_thumb(item, start_event, event, context);
              }
@@ -194,7 +384,7 @@ index f7fefd0..2da5864 100644
              _ => {
                  log::error!("drag not implemented for {:?}", item);
              }
-@@ -364,8 +426,8 @@ impl super::TermWindow {
+@@ -364,8 +454,8 @@ impl super::TermWindow {
      ) {
          self.last_ui_item.replace(item.clone());
          match item.item_type {
@@ -205,7 +395,7 @@ index f7fefd0..2da5864 100644
              }
              UIItemType::AboveScrollThumb => {
                  self.mouse_event_above_scroll_thumb(item, pane, event, context);
-@@ -455,14 +517,20 @@ impl super::TermWindow {
+@@ -455,14 +545,22 @@ impl super::TermWindow {
  
      pub fn mouse_event_tab_bar(
          &mut self,
@@ -223,12 +413,14 @@ index f7fefd0..2da5864 100644
 +                    // Capture the selected tab only after a deliberate drag begins.
 +                    self.dragging_tab_snapshot = None;
 +                    // For reordering tabs
-+                    self.dragging_tab_start_offset = Some(event.coords.x - item.x as isize);
++                    self.dragging_tab_grab_offset = Some((event.coords.x - item.x as isize, event.coords.y - item.y as isize));
++                    self.dragging_tab_id = Mux::get().get_active_tab_for_window(self.mux_window_id)
++                        .map(|tab| tab.tab_id());
 +                    self.dragging = Some((item, event));
                  }
                  TabBarItem::NewTabButton { .. } => {
                      self.do_new_tab_button_click(MousePress::Left);
-@@ -510,7 +578,7 @@ impl super::TermWindow {
+@@ -510,7 +608,7 @@ impl super::TermWindow {
                      }
                  }
              },
@@ -237,7 +429,7 @@ index f7fefd0..2da5864 100644
                  TabBarItem::Tab { tab_idx, .. } => {
                      self.close_specific_tab(tab_idx, true);
                  }
-@@ -522,7 +590,7 @@ impl super::TermWindow {
+@@ -522,7 +620,7 @@ impl super::TermWindow {
                  | TabBarItem::RightStatus
                  | TabBarItem::WindowButton(_) => {}
              },
@@ -246,7 +438,7 @@ index f7fefd0..2da5864 100644
                  TabBarItem::Tab { .. } => {
                      self.show_tab_navigator();
                  }
-@@ -534,7 +602,7 @@ impl super::TermWindow {
+@@ -534,7 +632,7 @@ impl super::TermWindow {
                  | TabBarItem::RightStatus
                  | TabBarItem::WindowButton(_) => {}
              },
@@ -256,7 +448,7 @@ index f7fefd0..2da5864 100644
                      context.set_window_drag_position(event.screen_coords);
                  }
 diff --git a/wezterm-gui/src/termwindow/render/fancy_tab_bar.rs b/wezterm-gui/src/termwindow/render/fancy_tab_bar.rs
-index 2474e2d..bd9cee7 100644
+index 2474e2d..3aa000e 100644
 --- a/wezterm-gui/src/termwindow/render/fancy_tab_bar.rs
 +++ b/wezterm-gui/src/termwindow/render/fancy_tab_bar.rs
 @@ -2,6 +2,7 @@ use crate::customglyph::*;
@@ -267,7 +459,7 @@ index 2474e2d..bd9cee7 100644
  
  use crate::termwindow::render::window_buttons::window_button_element;
  use crate::termwindow::{UIItem, UIItemType};
-@@ -528,13 +529,133 @@ impl crate::TermWindow {
+@@ -528,13 +529,138 @@ impl crate::TermWindow {
          let computed = self.fancy_tab_bar.as_ref().ok_or_else(|| {
              anyhow::anyhow!("paint_fancy_tab_bar called but fancy_tab_bar is None")
          })?;
@@ -297,7 +489,7 @@ index 2474e2d..bd9cee7 100644
 +            UIItemType::TabBar(TabBarItem::Tab { tab_idx, .. }) => *tab_idx,
 +            _ => return None,
 +        };
-+        let offset = self.dragging_tab_start_offset?;
++        let (offset, grab_y) = self.dragging_tab_grab_offset?;
 +        let snapshot = self.dragging_tab_snapshot.as_ref()?;
 +        let tabs_left = self.ui_items.iter().filter_map(|item| match item.item_type {
 +            UIItemType::TabBar(TabBarItem::Tab { .. }) => Some(item.x as isize),
@@ -310,14 +502,18 @@ index 2474e2d..bd9cee7 100644
 +            tabs_left,
 +            computed.bounds.max_x() as isize,
 +        ) as f32;
-+        Some((tab_idx, tab_drag_preview(snapshot, target_x)))
++        let target_y = drag_event.coords.y.saturating_sub(grab_y).clamp(
++            0, (self.dimensions.pixel_height as isize - snapshot.bounds.height() as isize).max(0),
++        ) as f32;
++        Some((tab_idx, tab_drag_preview(snapshot, target_x, target_y)))
 +    }
 +}
 +
-+fn tab_drag_preview(snapshot: &ComputedElement, target_x: f32) -> ComputedElement {
++fn tab_drag_preview(snapshot: &ComputedElement, target_x: f32, target_y: f32) -> ComputedElement {
 +    let mut floating = snapshot.clone();
 +    let delta_x = target_x - floating.bounds.min_x();
-+    floating.translate(euclid::Vector2D::new(delta_x, 0.0));
++    let delta_y = target_y - floating.bounds.min_y();
++    floating.translate(euclid::Vector2D::new(delta_x, delta_y));
 +    floating
 +}
 +
@@ -352,7 +548,7 @@ index 2474e2d..bd9cee7 100644
 +
 +    #[test]
 +    fn tab_drag_preview_keeps_text_above_its_background() {
-+        let preview = tab_drag_preview(&tab(), 250.);
++        let preview = tab_drag_preview(&tab(), 250., 80.);
 +        let kids = match &preview.content {
 +            ComputedElementContent::Children(kids) => kids,
 +            _ => panic!("the tab title and close button must remain in the preview"),
@@ -366,11 +562,12 @@ index 2474e2d..bd9cee7 100644
 +    #[test]
 +    fn tab_drag_preview_translates_children_without_changing_the_cached_tab() {
 +        let snapshot = tab();
-+        let preview = tab_drag_preview(&snapshot, 250.);
++        let preview = tab_drag_preview(&snapshot, 250., 80.);
 +        assert_eq!(snapshot.bounds.min_x(), 100.);
 +        assert_eq!(preview.bounds.min_x(), 250.);
 +        if let ComputedElementContent::Children(kids) = preview.content {
 +            assert_eq!(kids[0].content_rect.min_x(), 250.);
++            assert_eq!(kids[0].content_rect.min_y(), 80.);
 +            assert_eq!(kids[1].border_rect.min_x(), 250.);
 +        } else {
 +            panic!("the preview must keep its child elements");
@@ -402,17 +599,40 @@ index 2474e2d..bd9cee7 100644
  }
  
  fn make_x_button(
+@@ -584,10 +710,10 @@ fn make_x_button(
+         })
+     })
+     .padding(BoxDimension {
+-        left: Dimension::Cells(0.25),
+-        right: Dimension::Cells(0.25),
+-        top: Dimension::Cells(0.25),
+-        bottom: Dimension::Cells(0.25),
++        left: Dimension::Points(6.),
++        right: Dimension::Points(6.),
++        top: Dimension::Points(6.),
++        bottom: Dimension::Points(6.),
+     })
+     .margin(BoxDimension {
+         left: Dimension::Cells(0.5),
 diff --git a/wezterm-gui/src/termwindow/tab_drag.rs b/wezterm-gui/src/termwindow/tab_drag.rs
 new file mode 100644
-index 0000000..8233bac
+index 0000000..d88badf
 --- /dev/null
 +++ b/wezterm-gui/src/termwindow/tab_drag.rs
-@@ -0,0 +1,98 @@
+@@ -0,0 +1,117 @@
 +const DRAG_THRESHOLD: isize = 4;
 +
 +/// Ignore tiny pointer jitter so an ordinary click remains visually still.
-+pub(crate) fn tab_drag_has_started(start_x: isize, pointer_x: isize, already_dragging: bool) -> bool {
-+    already_dragging || pointer_x.abs_diff(start_x) >= DRAG_THRESHOLD as usize
++pub(crate) fn tab_drag_has_started(start: (isize, isize), pointer: (isize, isize), already_dragging: bool) -> bool {
++    already_dragging || pointer.0.abs_diff(start.0) >= DRAG_THRESHOLD as usize
++        || pointer.1.abs_diff(start.1) >= DRAG_THRESHOLD as usize
++}
++
++/// Require a deliberate vertical pull beyond the strip before creating a window.
++pub(crate) fn tab_drag_should_detach(pointer_y: isize, tab_top: isize, tab_height: isize) -> bool {
++    let margin = (tab_height / 2).max(8);
++    pointer_y < tab_top.saturating_sub(margin)
++        || pointer_y > tab_top.saturating_add(tab_height).saturating_add(margin)
 +}
 +
 +/// Keep the floating tab inside the tab bar while retaining the grab offset.
@@ -450,7 +670,7 @@ index 0000000..8233bac
 +
 +#[cfg(test)]
 +mod tests {
-+    use super::{dragged_tab_left, tab_drag_has_started, tab_drag_target};
++    use super::{dragged_tab_left, tab_drag_has_started, tab_drag_should_detach, tab_drag_target};
 +
 +    const TABS: [(usize, usize, usize); 4] =
 +        [(0, 100, 100), (1, 200, 100), (2, 300, 100), (3, 400, 100)];
@@ -486,16 +706,27 @@ index 0000000..8233bac
 +
 +    #[test]
 +    fn starts_after_a_small_deliberate_move() {
-+        assert!(!tab_drag_has_started(200, 203, false));
-+        assert!(tab_drag_has_started(200, 204, false));
-+        assert!(tab_drag_has_started(200, 196, false));
++        assert!(!tab_drag_has_started((200, 20), (203, 20), false));
++        assert!(tab_drag_has_started((200, 20), (204, 20), false));
++        assert!(tab_drag_has_started((200, 20), (196, 20), false));
 +    }
 +
 +    #[test]
 +    fn stays_active_when_the_pointer_returns_to_the_grab_point() {
-+        assert!(tab_drag_has_started(200, 200, true));
-+        assert!(tab_drag_has_started(200, 203, true));
-+        assert!(!tab_drag_has_started(200, 200, false));
++        assert!(tab_drag_has_started((200, 20), (200, 20), true));
++        assert!(tab_drag_has_started((200, 20), (203, 20), true));
++        assert!(!tab_drag_has_started((200, 20), (200, 20), false));
++    }
++
++    #[test]
++    fn starts_on_vertical_movement_and_requires_deliberate_detachment() {
++        assert!(tab_drag_has_started((200, 20), (200, 24), false));
++        assert!(!tab_drag_should_detach(60, 0, 40));
++        assert!(tab_drag_should_detach(61, 0, 40));
++        assert!(!tab_drag_should_detach(-20, 0, 40));
++        assert!(tab_drag_should_detach(-21, 0, 40));
++        assert!(!tab_drag_should_detach(520, 500, 40));
++        assert!(tab_drag_should_detach(479, 500, 40));
 +    }
 +
 +    #[test]

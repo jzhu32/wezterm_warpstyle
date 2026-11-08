@@ -44,6 +44,7 @@ local themes = {
     hover = "#1C1C1C",
     tint = "#3D2E00",
     muted = "#8C8C8C",
+    claude = "#D97757",
     ansi = { "#121212", "#D22D1E", "#1CA05A", "#E5A01A", "#3780E9", "#BF409D", "#799C92", "#FAF9F6" },
     -- Warp lightens colors that are too close to the background; WezTerm does
     -- not, so bright black is a readable grey here instead of Warp's #292929.
@@ -61,6 +62,7 @@ local themes = {
     hover = "#141414",
     tint = "#3D2E00",
     muted = "#8E8E8E",
+    claude = "#D97757",
     ansi = { "#616161", "#FF8272", "#B4FA72", "#FEFDC2", "#A5D5FE", "#FF8FFD", "#D0D1FE", "#F1F1F1" },
     brights = { "#8E8E8E", "#FFC4BD", "#D6FCB9", "#FEFDD5", "#C1E3FE", "#FFB1FE", "#E5E6FE", "#FEFFFF" },
   },
@@ -76,6 +78,7 @@ local themes = {
     hover = "#F7F7F7",
     tint = "#FFF1CC",
     muted = "#6B6B6B",
+    claude = "#A8472D",
     ansi = { "#212121", "#C30771", "#10A778", "#A89C14", "#008EC4", "#523C79", "#20A5BA", "#E0E0E0" },
     brights = { "#212121", "#FB007A", "#5FD7AF", "#F3E430", "#20BBFC", "#6855DE", "#4FB8CC", "#F1F1F1" },
   },
@@ -162,6 +165,7 @@ config.window_decorations = "INTEGRATED_BUTTONS|RESIZE"
 -- space, Esc to leave. WezTerm's own full screen keeps the window in place
 -- and quietly takes away its edges, which looks like a window that broke.
 config.native_macos_fullscreen_mode = true
+config.switch_to_last_active_tab_when_closing_tab = true
 config.window_frame = {
   font = wezterm.font_with_fallback({ settings.font, "Menlo" }),
   font_size = settings.tab_font_size,
@@ -245,6 +249,16 @@ local function agent_name(program, command)
   end
 end
 
+-- Real brand glyphs from Nerd Fonts 3.5.1 (Codicons and Devicons).
+local agent_icons = { claude = "\u{ec82}", codex = "\u{ec81}" }
+local program_icons = {
+  nvim = "\u{e83a}", vim = "\u{e7c5}", python = "\u{e73c}",
+  node = "\u{e718}", npm = "\u{e71e}", npx = "\u{e71e}",
+  git = "\u{e702}", docker = "\u{f308}", cargo = "\u{e7a8}",
+  rustc = "\u{e7a8}", go = "\u{e724}", java = "\u{e738}",
+}
+local claude_status_marks = { ["✳"] = true, ["✻"] = true, ["✽"] = true, ["✶"] = true, ["✢"] = true }
+
 -- What a tab is called, as Warp's tab list has it: a name you gave it, else
 -- the folder and git branch while its shell is waiting, else the running
 -- program's own title. Claude and Codex keep a small, recognizable mark even
@@ -252,10 +266,10 @@ end
 local function tab_label(tab_title, pane, room)
   local vars = pane.user_vars or {}
   local program = program_name(pane.foreground_process_name)
-  local agent = agent_name(program, vars.WEZ_CMD)
+  local agent = agent_name(program, vars.WEZ_ZLE ~= "1" and vars.WEZ_CMD or nil)
   local waiting = vars.WEZ_ZLE == "1" or (vars.WEZ_ZLE == nil and (program == "" or shells[program]))
   if tab_title ~= "" then
-    local icon = agent == "claude" and "✳" or agent == "codex" and "◇" or ""
+    local icon = agent_icons[agent] or (not waiting and program_icons[program]) or ""
     local taken = icon ~= "" and 2 or 0
     return icon, keep_start(tab_title, room - taken), nil, agent
   elseif waiting then
@@ -272,18 +286,19 @@ local function tab_label(tab_title, pane, room)
   if title == "" or title == basename(pane.foreground_process_name or "") then
     title = program
   end
-  -- Claude Code supplies a changing leading status mark. Keep it in the icon
-  -- slot so the title itself stays aligned, and give Codex its own stable mark.
+  -- Activity already has the attention dot; keep the application's logo stable.
   if agent == "claude" then
     local status, name = title:match("^([%z\1-\127\194-\244][\128-\191]*)%s*(.*)$")
-    if not status or status:byte(1) < 128 then
-      status, name = "✳", title
-    end
+    name = claude_status_marks[status] and name or title
     name = name ~= "" and name or "Claude"
-    return status, keep_start(name, room - 2), nil, agent
+    return agent_icons.claude, keep_start(name, room - 2), nil, agent
   elseif agent == "codex" then
     local name = title ~= "" and title or "Codex"
-    return "◇", keep_start(name, room - 2), nil, agent
+    return agent_icons.codex, keep_start(name, room - 2), nil, agent
+  end
+  local icon = program_icons[program] or (program:match("^python%d") and program_icons.python)
+  if icon then
+    return icon, keep_start(title, room - 2)
   end
   -- Plain program names get the terminal icon. A program title that deliberately
   -- starts with a symbol keeps that symbol untouched.
@@ -357,8 +372,8 @@ wezterm.on("format-tab-title", function(tab, tabs, panes, _, _, max_width)
   if needs_you then
     add(items, colored(attention_color, dot))
   end
-  local agent_color = agent == "claude" and theme.brights[2]
-    or agent == "codex" and theme.brights[6]
+  local agent_color = agent == "claude" and theme.claude
+    or agent == "codex" and theme.fg
   if tab.is_active then
     add(items, colored(agent_color or theme.cursor or theme.accent, icon))
     add(items, { Attribute = { Intensity = "Bold" } }, { Text = label }, "ResetAttributes")
@@ -695,9 +710,19 @@ local rename_tab = act.PromptInputLine({
   end),
 })
 
+local detach_tab = wezterm.action_callback(function(window)
+  local tab = window:active_tab()
+  if tab and tab.move_to_new_window then
+    tab:move_to_new_window()
+  else
+    window:toast_notification("WezTerm", "Fully quit and reopen the updated app to detach tabs.", nil, 5000)
+  end
+end)
+
 wezterm.on("augment-command-palette", function()
   return {
     { brief = "Rename tab", icon = "md_rename_box", action = rename_tab },
+    { brief = "Move this tab to a new window", icon = "md_window_restore", action = detach_tab },
     { brief = "Close this split", icon = "md_close_box_outline",
       action = act.CloseCurrentPane({ confirm = true }) },
   }

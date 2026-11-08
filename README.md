@@ -53,6 +53,7 @@ that in [Ask an agent instead](#ask-an-agent-instead).
    the pinned custom WezTerm, saves the previous app under `.build/backup.*`,
    and replaces `/Applications/WezTerm.app`. Existing Homebrew WezTerm casks
    are removed after the custom app has built successfully.
+   The installer also updates Hack Nerd Font for the Claude and OpenAI logo glyphs.
 2. Links `wezterm.lua` and `shell.zsh` into `~/.config/wezterm`. Files that
    were already there are kept with `.before-warpstyle` added to their names.
 3. Adds one line to `~/.zshrc` that loads `shell.zsh` inside WezTerm. Your
@@ -127,6 +128,13 @@ release, including when the pointer returns to its starting point. The title
 and close button move above the other tabs together. The rest of the app stays
 at that pinned upstream version.
 
+Pulling a tab well above or below the tab strip and releasing moves the whole
+tab into a new window. Its programs, split layout and name stay intact. A move
+cursor indicates that release will create a window. Press Esc to cancel, or
+bring it back into the strip to keep reordering. The command palette also has
+**Move this tab to a new window**. This creates separate windows; dragging a tab
+into another existing window is not implemented.
+
 The app is built and signed locally, without an Apple notarization certificate.
 Source, compiled files and app backups stay in the ignored `.build/` folder;
 GitHub contains the patch and build instructions. Avoid installing a Homebrew
@@ -179,6 +187,7 @@ changed size in the meantime.
 | Cmd+Shift+R, or Cmd+P and "Rename tab" | Name the tab yourself. An empty name goes back to the automatic one. |
 | Ctrl+Shift+Left / Right | Move the tab. |
 | Drag a tab left or right with the mouse | Reorder tabs in the same window. Grab the tab's label, away from its close button. |
+| Pull a tab above or below the bar, then release | Move the whole tab, including its splits and running programs, into a new window. Esc cancels. |
 | Cmd+D, Cmd+Shift+D | Split to the right, split downwards. |
 | Cmd+Option+4 | Turn the pane you are in into a grid of four. |
 | Cmd+Option+arrows | Move between splits. Cmd+Ctrl+arrows resizes them. |
@@ -187,10 +196,16 @@ changed size in the meantime.
 
 Tabs share the bar evenly. Each shows its last two folders and git branch
 while the shell is waiting, or the running program's own title. Claude and
-Codex tabs keep their own colored symbol so they stay easy to spot. A tab is
+Codex tabs show their real logos from Nerd Fonts 3.5.1: Claude in warm orange,
+Codex with the neutral OpenAI mark. Common tools such as Git, Python, Node,
+Docker, Vim and Neovim use their own icons too. A tab is
 tinted amber, and you get a notification, when Claude Code finishes or asks
 something while you are elsewhere, or when a command that ran longer than 30
 seconds ends. The tabs you had open come back the next time WezTerm starts.
+
+Close buttons have larger click targets. Closing the active tab returns to the
+most recently used remaining tab; tabs with running work still ask before closing.
+Closing stays immediate, without a delay or decorative exit animation.
 
 A new tab or split opens with a short list of shortcuts, then its first prompt,
 at the top of the window. The list scrolls away as you work, and the prompt
@@ -301,13 +316,14 @@ window change.
 python3 tests/run.py
 ```
 
-`./build-wezterm.sh` also runs native drag and renderer regression tests without
+`./build-wezterm.sh` also runs native drag, whole-tab transfer and renderer tests without
 opening a window, checks the app's signature and configuration, and rejects
 binaries linked to Homebrew libraries.
 After installing a changed native patch, manually check dragging in both
 directions, grabbing near either edge, keeping the label visible, a fast move
-across several tabs, switching tabs, the close and `+` buttons, and dragging
-the empty part of the bar to move the window.
+across several tabs, switching tabs, pulling a split tab into a new window,
+cancelling with Esc, the close and `+` buttons, and dragging the empty part
+of the bar to move the window.
 
 This drives a real zsh through every editing feature, runs the logic in
 `wezterm.lua` against a stand-in for WezTerm, and starts WezTerm's own engine
