@@ -134,10 +134,11 @@ tab into a new window. Its programs, split layout and name stay intact. A move
 cursor indicates that release will create a window. Press Esc to cancel, or
 bring it back into the strip to keep reordering. Once the pointer leaves the
 source window, any visible part of another WezTerm window becomes a magnetic
-join target. The tab title and icon preview at the end of that window's tab bar,
-and the alias cursor confirms the destination before release. This works in
-every direction without aligning the two tab bars. The command palette also has
-**Move this tab to a new window**.
+join target. Outside the source window, a native floating preview keeps the
+tab's title, icon, size, colors and grab point under the pointer in every
+direction. The same tab previews at the end of a destination window's tab bar,
+and the alias cursor confirms the join before release. The command palette also
+has **Move this tab to a new window**.
 
 The app is built and signed locally, without an Apple notarization certificate.
 Source, compiled files and app backups stay in the ignored `.build/` folder;
@@ -366,7 +367,9 @@ across several tabs, switching tabs, pulling a split tab into a new window,
 cancelling with Esc, the close and `+` buttons, and dragging the empty part
 of the bar to move the window. Also detach a tab, then drag it upward, downward,
 and sideways onto the body of the original window to confirm the magnetic
-preview appears and the tab rejoins with its panes intact.
+preview appears and the tab rejoins with its panes intact. Confirm that the
+floating title remains visible above, below and beside the source, then cancel
+once with Esc and once by bringing it back inside.
 
 This drives a real zsh through every editing feature, runs the logic in
 `wezterm.lua` against a stand-in for WezTerm, and starts WezTerm's own engine

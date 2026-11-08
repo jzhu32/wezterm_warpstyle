@@ -300,10 +300,10 @@ index 9edfe33..cb547dd 100644
              }
              ComputedElementContent::Poly { poly, line_width } => {
 diff --git a/wezterm-gui/src/termwindow/keyevent.rs b/wezterm-gui/src/termwindow/keyevent.rs
-index d669080..3e5e462 100644
+index d669080..de98e40 100644
 --- a/wezterm-gui/src/termwindow/keyevent.rs
 +++ b/wezterm-gui/src/termwindow/keyevent.rs
-@@ -597,6 +597,19 @@ impl super::TermWindow {
+@@ -597,6 +597,20 @@ impl super::TermWindow {
      }
  
      pub fn key_event_impl(&mut self, window_key: KeyEvent, context: &dyn WindowOps) {
@@ -312,6 +312,7 @@ index d669080..3e5e462 100644
 +            && window_key.key == ::window::KeyCode::Char('\u{1b}')
 +        {
 +            self.clear_cross_window_tab_drag();
++            context.set_tab_drag_preview(None);
 +            self.dragging = None;
 +            self.dragging_tab_id = None;
 +            self.dragging_tab_grab_offset = None;
@@ -324,7 +325,7 @@ index d669080..3e5e462 100644
              Some(pane) => pane,
              None => return,
 diff --git a/wezterm-gui/src/termwindow/mod.rs b/wezterm-gui/src/termwindow/mod.rs
-index 27567d9..785aea8 100644
+index 27567d9..c86f47d 100644
 --- a/wezterm-gui/src/termwindow/mod.rs
 +++ b/wezterm-gui/src/termwindow/mod.rs
 @@ -83,6 +83,7 @@ pub mod render;
@@ -351,11 +352,12 @@ index 27567d9..785aea8 100644
  
      modal: RefCell<Option<Rc<dyn Modal>>>,
  
-@@ -533,6 +543,11 @@ impl TermWindow {
+@@ -533,6 +543,12 @@ impl TermWindow {
          self.load_os_parameters();
  
          if self.focused.is_none() {
 +            self.clear_cross_window_tab_drag();
++            window.set_tab_drag_preview(None);
 +            self.dragging = None;
 +            self.dragging_tab_grab_offset = None;
 +            self.dragging_tab_id = None;
@@ -363,7 +365,7 @@ index 27567d9..785aea8 100644
              self.last_mouse_click = None;
              self.current_mouse_buttons.clear();
              self.current_mouse_capture = None;
-@@ -788,6 +803,9 @@ impl TermWindow {
+@@ -788,6 +804,9 @@ impl TermWindow {
              semantic_zones: HashMap::new(),
              ui_items: vec![],
              dragging: None,
@@ -374,10 +376,10 @@ index 27567d9..785aea8 100644
              is_click_to_focus_window: false,
              key_table_state: KeyTableState::default(),
 diff --git a/wezterm-gui/src/termwindow/mouseevent.rs b/wezterm-gui/src/termwindow/mouseevent.rs
-index f7fefd0..7021981 100644
+index f7fefd0..247e1bd 100644
 --- a/wezterm-gui/src/termwindow/mouseevent.rs
 +++ b/wezterm-gui/src/termwindow/mouseevent.rs
-@@ -1,3 +1,8 @@
+@@ -1,10 +1,15 @@
 +use super::render::fancy_tab_bar::clone_tab_element;
 +use super::tab_drag::{
 +    screen_point_is_in_window, set_cross_window_tab_drag, tab_drag_has_started,
@@ -386,7 +388,22 @@ index f7fefd0..7021981 100644
  use crate::tabbar::TabBarItem;
  use crate::termwindow::{
      GuiWin, MouseCapture, PositionedSplit, ScrollHit, TermWindowNotif, UIItem, UIItemType, TMB,
-@@ -129,9 +134,59 @@ impl super::TermWindow {
+ };
+ use ::window::{
+     CursorIcon, MouseButtons as WMB, MouseEvent, MouseEventKind as WMEK, MousePress,
+-    WindowDecorations, WindowOps, WindowState,
++    TabDragPreview, WindowDecorations, WindowOps, WindowState,
+ };
+ use config::keyassignment::{KeyAssignment, MouseEventTrigger, SpawnTabDomain};
+ use config::MouseEventAltScreen;
+@@ -125,13 +130,66 @@ impl super::TermWindow {
+             WMEK::Release(ref press) => {
+                 self.current_mouse_capture = None;
+                 self.current_mouse_buttons.retain(|p| p != press);
++                if press == &MousePress::Left {
++                    context.set_tab_drag_preview(None);
++                }
+                 if press == &MousePress::Left && self.window_drag_position.take().is_some() {
                      // Completed a window drag
                      return;
                  }
@@ -395,7 +412,7 @@ index f7fefd0..7021981 100644
 -                    return;
 +                if press == &MousePress::Left {
 +                    let destination = self.tab_drop_target(&event);
-+                    self.update_cross_window_tab_drag(None);
++                    self.update_cross_window_tab_drag(None, None);
 +                    if let Some((item, _)) = self.dragging.take() {
 +                        let tab_id = self.dragging_tab_id.take();
 +                        let grab = self.dragging_tab_grab_offset.take();
@@ -449,7 +466,7 @@ index f7fefd0..7021981 100644
                  }
              }
  
-@@ -332,6 +387,160 @@ impl super::TermWindow {
+@@ -332,6 +390,217 @@ impl super::TermWindow {
          self.dragging.replace((item, start_event));
      }
  
@@ -484,20 +501,18 @@ index f7fefd0..7021981 100644
 +            })
 +    }
 +
-+    fn update_cross_window_tab_drag(&self, destination: Option<&GuiWin>) {
-+        let title = self.dragging.as_ref().and_then(|(item, _)| {
-+            let tab_idx = match item.item_type {
-+                UIItemType::TabBar(TabBarItem::Tab { tab_idx, .. }) => tab_idx,
-+                _ => return None,
-+            };
-+            self.tab_bar
-+                .items()
-+                .iter()
-+                .find(|entry| {
-+                    matches!(entry.item, TabBarItem::Tab { tab_idx: idx, .. } if idx == tab_idx)
-+                })
-+                .map(|entry| entry.title.clone())
-+        });
++    fn tab_title(&self, tab_idx: usize) -> Option<Line> {
++        self.tab_bar
++            .items()
++            .iter()
++            .find(|entry| {
++                matches!(entry.item, TabBarItem::Tab { tab_idx: idx, .. } if idx == tab_idx)
++            })
++            .map(|entry| entry.title.clone())
++    }
++
++    fn update_cross_window_tab_drag(&self, destination: Option<&GuiWin>, tab_idx: Option<usize>) {
++        let title = tab_idx.and_then(|tab_idx| self.tab_title(tab_idx));
 +        let destination = destination
 +            .and_then(|destination| title.map(|title| (destination.mux_window_id, title)));
 +        let (previous, next) = set_cross_window_tab_drag(self.mux_window_id, destination);
@@ -525,7 +540,58 @@ index f7fefd0..7021981 100644
 +    }
 +
 +    pub(crate) fn clear_cross_window_tab_drag(&self) {
-+        self.update_cross_window_tab_drag(None);
++        self.update_cross_window_tab_drag(None, None);
++    }
++
++    fn update_native_tab_drag_preview(
++        &self,
++        item: &UIItem,
++        tab_idx: usize,
++        event: &MouseEvent,
++        grab_offset: (isize, isize),
++        context: &dyn WindowOps,
++    ) {
++        let outside = event.coords.x < 0
++            || event.coords.x >= self.dimensions.pixel_width as isize
++            || event.coords.y < 0
++            || event.coords.y >= self.dimensions.pixel_height as isize;
++        if !outside {
++            context.set_tab_drag_preview(None);
++            return;
++        }
++
++        let Some(title) = self.tab_title(tab_idx) else {
++            context.set_tab_drag_preview(None);
++            return;
++        };
++        let colors = self
++            .config
++            .colors
++            .as_ref()
++            .and_then(|colors| colors.tab_bar.as_ref())
++            .cloned()
++            .unwrap_or_default()
++            .active_tab();
++        let font_name = self
++            .config
++            .window_frame
++            .font
++            .as_ref()
++            .and_then(|style| style.font.first())
++            .map(|font| font.family.clone())
++            .unwrap_or_else(|| "Roboto".to_string());
++
++        context.set_tab_drag_preview(Some(TabDragPreview {
++            title: title.as_str().into_owned(),
++            screen_position: event.screen_coords,
++            grab_offset,
++            width: item.width,
++            height: item.height,
++            background: colors.bg_color.into(),
++            foreground: colors.fg_color.into(),
++            font_name,
++            font_size: self.config.window_frame.font_size.unwrap_or(12.),
++        }));
 +    }
 +
 +    fn drag_reorder_tab(
@@ -562,8 +628,16 @@ index f7fefd0..7021981 100644
 +                });
 +        }
 +
++        self.update_native_tab_drag_preview(
++            &item,
++            tab_idx,
++            &event,
++            (start_offset, start_offset_y),
++            context,
++        );
++
 +        let destination = self.tab_drop_target(&event);
-+        self.update_cross_window_tab_drag(destination.as_ref());
++        self.update_cross_window_tab_drag(destination.as_ref(), Some(tab_idx));
 +        if destination.is_some() {
 +            context.set_cursor(Some(CursorIcon::Alias));
 +            self.dragging.replace((item, event));
@@ -610,7 +684,7 @@ index f7fefd0..7021981 100644
      fn drag_ui_item(
          &mut self,
          item: UIItem,
-@@ -348,6 +557,9 @@ impl super::TermWindow {
+@@ -348,6 +617,9 @@ impl super::TermWindow {
              UIItemType::ScrollThumb => {
                  self.drag_scroll_thumb(item, start_event, event, context);
              }
@@ -620,7 +694,7 @@ index f7fefd0..7021981 100644
              _ => {
                  log::error!("drag not implemented for {:?}", item);
              }
-@@ -364,8 +576,8 @@ impl super::TermWindow {
+@@ -364,8 +636,8 @@ impl super::TermWindow {
      ) {
          self.last_ui_item.replace(item.clone());
          match item.item_type {
@@ -631,7 +705,7 @@ index f7fefd0..7021981 100644
              }
              UIItemType::AboveScrollThumb => {
                  self.mouse_event_above_scroll_thumb(item, pane, event, context);
-@@ -455,14 +667,26 @@ impl super::TermWindow {
+@@ -455,14 +727,26 @@ impl super::TermWindow {
  
      pub fn mouse_event_tab_bar(
          &mut self,
@@ -660,7 +734,7 @@ index f7fefd0..7021981 100644
                  }
                  TabBarItem::NewTabButton { .. } => {
                      self.do_new_tab_button_click(MousePress::Left);
-@@ -510,7 +734,7 @@ impl super::TermWindow {
+@@ -510,7 +794,7 @@ impl super::TermWindow {
                      }
                  }
              },
@@ -669,7 +743,7 @@ index f7fefd0..7021981 100644
                  TabBarItem::Tab { tab_idx, .. } => {
                      self.close_specific_tab(tab_idx, true);
                  }
-@@ -522,7 +746,7 @@ impl super::TermWindow {
+@@ -522,7 +806,7 @@ impl super::TermWindow {
                  | TabBarItem::RightStatus
                  | TabBarItem::WindowButton(_) => {}
              },
@@ -678,7 +752,7 @@ index f7fefd0..7021981 100644
                  TabBarItem::Tab { .. } => {
                      self.show_tab_navigator();
                  }
-@@ -534,7 +758,7 @@ impl super::TermWindow {
+@@ -534,7 +818,7 @@ impl super::TermWindow {
                  | TabBarItem::RightStatus
                  | TabBarItem::WindowButton(_) => {}
              },
@@ -688,7 +762,7 @@ index f7fefd0..7021981 100644
                      context.set_window_drag_position(event.screen_coords);
                  }
 diff --git a/wezterm-gui/src/termwindow/render/fancy_tab_bar.rs b/wezterm-gui/src/termwindow/render/fancy_tab_bar.rs
-index 2474e2d..94918fa 100644
+index 2474e2d..97517fc 100644
 --- a/wezterm-gui/src/termwindow/render/fancy_tab_bar.rs
 +++ b/wezterm-gui/src/termwindow/render/fancy_tab_bar.rs
 @@ -2,6 +2,10 @@ use crate::customglyph::*;
@@ -749,7 +823,7 @@ index 2474e2d..94918fa 100644
                                  kids.push(make_x_button(&font, &metrics, &colors, tab_idx, active));
                              }
                              ElementContent::Children(kids)
-@@ -528,13 +552,152 @@ impl crate::TermWindow {
+@@ -528,13 +552,159 @@ impl crate::TermWindow {
          let computed = self.fancy_tab_bar.as_ref().ok_or_else(|| {
              anyhow::anyhow!("paint_fancy_tab_bar called but fancy_tab_bar is None")
          })?;
@@ -778,6 +852,13 @@ index 2474e2d..94918fa 100644
 +            return None;
 +        }
 +        let (drag_item, drag_event) = self.dragging.as_ref()?;
++        if drag_event.coords.x < 0
++            || drag_event.coords.x >= self.dimensions.pixel_width as isize
++            || drag_event.coords.y < 0
++            || drag_event.coords.y >= self.dimensions.pixel_height as isize
++        {
++            return None;
++        }
 +        let tab_idx = match &drag_item.item_type {
 +            UIItemType::TabBar(TabBarItem::Tab { tab_idx, .. }) => *tab_idx,
 +            _ => return None,
@@ -903,7 +984,7 @@ index 2474e2d..94918fa 100644
  }
  
  fn make_x_button(
-@@ -584,10 +747,10 @@ fn make_x_button(
+@@ -584,10 +754,10 @@ fn make_x_button(
          })
      })
      .padding(BoxDimension {
@@ -1161,10 +1242,41 @@ index 0000000..5e64916
 +    }
 +}
 diff --git a/window/src/lib.rs b/window/src/lib.rs
-index 22de40a..db12374 100644
+index 22de40a..78296ac 100644
 --- a/window/src/lib.rs
 +++ b/window/src/lib.rs
-@@ -300,6 +300,13 @@ pub trait WindowOps {
+@@ -58,6 +58,19 @@ pub struct Dimensions {
+     pub dpi: usize,
+ }
+ 
++#[derive(Debug, Clone, PartialEq)]
++pub struct TabDragPreview {
++    pub title: String,
++    pub screen_position: ScreenPoint,
++    pub grab_offset: (isize, isize),
++    pub width: usize,
++    pub height: usize,
++    pub background: color::SrgbaTuple,
++    pub foreground: color::SrgbaTuple,
++    pub font_name: String,
++    pub font_size: f64,
++}
++
+ pub type ULength = euclid::Length<usize, PixelUnit>;
+ pub type Rect = euclid::Rect<isize, PixelUnit>;
+ pub type RectF = euclid::Rect<f32, PixelUnit>;
+@@ -265,6 +278,10 @@ pub trait WindowOps {
+     /// Change the cursor, `None` hides the cursor
+     fn set_cursor(&self, cursor: Option<CursorIcon>);
+ 
++    /// Show, move, or hide a native preview for an item being dragged outside
++    /// the client area. Backends that do not support it can ignore this.
++    fn set_tab_drag_preview(&self, _preview: Option<TabDragPreview>) {}
++
+     /// Invalidate the window so that the entire client area will
+     /// be repainted shortly
+     fn invalidate(&self);
+@@ -300,6 +317,13 @@ pub trait WindowOps {
      /// windows to move themselves (not Wayland).
      fn set_window_position(&self, _coords: ScreenPoint) {}
  
@@ -1179,21 +1291,200 @@ index 22de40a..db12374 100644
      /// cursor input location.  This is used primarily for
      /// the platform specific input method editor
 diff --git a/window/src/os/macos/window.rs b/window/src/os/macos/window.rs
-index 1193d39..79dc65c 100644
+index 1193d39..9397042 100644
 --- a/window/src/os/macos/window.rs
 +++ b/window/src/os/macos/window.rs
-@@ -10,8 +10,8 @@ use crate::parameters::{Border, Parameters, TitleBar};
+@@ -10,8 +10,9 @@ use crate::parameters::{Border, Parameters, TitleBar};
  use crate::{
      Clipboard, Connection, CursorIcon, DeadKeyStatus, Dimensions, Handled, KeyCode, KeyEvent,
      Modifiers, MouseButtons, MouseEvent, MouseEventKind, MousePress, Point, RawKeyEvent, Rect,
 -    RequestedWindowGeometry, ResizeIncrement, ResolvedGeometry, ScreenPoint, Size, ULength,
 -    WindowDecorations, WindowEvent, WindowEventSender, WindowOps, WindowState,
 +    RequestedWindowGeometry, ResizeIncrement, ResolvedGeometry, ScreenPoint, ScreenRect, Size,
-+    ULength, WindowDecorations, WindowEvent, WindowEventSender, WindowOps, WindowState,
++    TabDragPreview, ULength, WindowDecorations, WindowEvent, WindowEventSender, WindowOps,
++    WindowState,
  };
  use anyhow::{anyhow, bail, ensure};
  use async_trait::async_trait;
-@@ -830,6 +830,33 @@ impl WindowOps for Window {
+@@ -391,6 +392,155 @@ pub(crate) struct WindowInner {
+     view: StrongPtr,
+     window: StrongPtr,
+     config: ConfigHandle,
++    drag_preview: Option<NativeTabDragPreview>,
++}
++
++struct NativeTabDragPreview {
++    window: StrongPtr,
++    style: TabDragPreview,
++}
++
++fn tab_drag_preview_style_matches(a: &TabDragPreview, b: &TabDragPreview) -> bool {
++    a.title == b.title
++        && a.width == b.width
++        && a.height == b.height
++        && a.background == b.background
++        && a.foreground == b.foreground
++        && a.font_name == b.font_name
++        && a.font_size == b.font_size
++}
++
++unsafe fn screen_backing_scale() -> f64 {
++    let screens = NSScreen::screens(nil);
++    let primary = screens.objectAtIndex(0);
++    let frame = NSScreen::frame(primary);
++    let backing_frame = NSScreen::convertRectToBacking_(primary, frame);
++    backing_frame.size.height / frame.size.height
++}
++
++unsafe fn tab_drag_preview_color(color: crate::color::SrgbaTuple, alpha: f64) -> id {
++    let (red, green, blue, source_alpha) = color.to_tuple_rgba();
++    msg_send![
++        class!(NSColor),
++        colorWithSRGBRed: red as f64
++        green: green as f64
++        blue: blue as f64
++        alpha: (source_alpha as f64 * alpha).clamp(0., 1.)
++    ]
++}
++
++unsafe fn create_tab_drag_preview_window(
++    parent: &StrongPtr,
++    preview: &TabDragPreview,
++) -> StrongPtr {
++    let panel: id = msg_send![class!(NSPanel), alloc];
++    let panel = StrongPtr::new(NSWindow::initWithContentRect_styleMask_backing_defer_(
++        panel,
++        NSRect::new(NSPoint::new(0., 0.), NSSize::new(1., 1.)),
++        NSWindowStyleMask::NSBorderlessWindowMask,
++        NSBackingStoreBuffered,
++        NO,
++    ));
++    panel.setReleasedWhenClosed_(NO);
++    panel.setOpaque_(NO);
++    panel.setBackgroundColor_(cocoa::appkit::NSColor::clearColor(nil));
++    panel.setHasShadow_(YES);
++    let _: () = msg_send![*panel, setIgnoresMouseEvents: YES];
++    let _: () = msg_send![*panel, setAlphaValue: 0.96f64];
++    let parent_level: NSInteger = msg_send![**parent, level];
++    let _: () = msg_send![*panel, setLevel: parent_level.saturating_add(1)];
++
++    let container: id = msg_send![class!(NSView), alloc];
++    let container = StrongPtr::new(msg_send![container, initWithFrame: NSRect::new(
++        NSPoint::new(0., 0.),
++        NSSize::new(1., 1.),
++    )]);
++    let _: () = msg_send![*container, setWantsLayer: YES];
++
++    let label: id = msg_send![class!(NSTextField), labelWithString: *nsstring(&preview.title)];
++    let label = StrongPtr::retain(label);
++    let _: () = msg_send![*label, setUsesSingleLineMode: YES];
++    let cell: id = msg_send![*label, cell];
++    let _: () = msg_send![cell, setLineBreakMode: 4usize];
++    let _: () = msg_send![*container, addSubview: *label];
++    panel.setContentView_(*container);
++
++    configure_tab_drag_preview_window(&panel, preview);
++    panel
++}
++
++unsafe fn configure_tab_drag_preview_window(window: &StrongPtr, preview: &TabDragPreview) {
++    let scale = screen_backing_scale();
++    let width = preview.width.max(1) as f64 / scale;
++    let height = preview.height.max(1) as f64 / scale;
++    let container: id = msg_send![**window, contentView];
++    let _: () = msg_send![container, setFrame: NSRect::new(
++        NSPoint::new(0., 0.),
++        NSSize::new(width, height),
++    )];
++    let layer: id = msg_send![container, layer];
++    let background = tab_drag_preview_color(preview.background, 1.);
++    let background_cg: id = msg_send![background, CGColor];
++    let _: () = msg_send![layer, setBackgroundColor: background_cg];
++    let _: () = msg_send![layer, setCornerRadius: (height * 0.22).clamp(4., 8.)];
++    let _: () = msg_send![layer, setMasksToBounds: YES];
++    let border = tab_drag_preview_color(preview.foreground, 0.24);
++    let border_cg: id = msg_send![border, CGColor];
++    let _: () = msg_send![layer, setBorderColor: border_cg];
++    let _: () = msg_send![layer, setBorderWidth: 1.0f64];
++
++    let subviews: id = msg_send![container, subviews];
++    let label: id = msg_send![subviews, firstObject];
++    let _: () = msg_send![label, setStringValue: *nsstring(&preview.title)];
++    let foreground = tab_drag_preview_color(preview.foreground, 1.);
++    let _: () = msg_send![label, setTextColor: foreground];
++    let font_name = nsstring(&preview.font_name);
++    let mut font: id = msg_send![class!(NSFont), fontWithName: *font_name size: preview.font_size];
++    if font.is_null() {
++        font = msg_send![class!(NSFont), systemFontOfSize: preview.font_size];
++    }
++    let _: () = msg_send![label, setFont: font];
++    let fitting: NSSize = msg_send![label, fittingSize];
++    let inset = (height * 0.24).clamp(7., 12.);
++    let label_height = fitting.height.min(height);
++    let _: () = msg_send![label, setFrame: NSRect::new(
++        NSPoint::new(inset, (height - label_height) / 2.),
++        NSSize::new((width - inset * 2.).max(1.), label_height),
++    )];
++}
++
++unsafe fn position_tab_drag_preview_window(window: &StrongPtr, preview: &TabDragPreview) {
++    let scale = screen_backing_scale();
++    let width = preview.width.max(1) as f64 / scale;
++    let height = preview.height.max(1) as f64 / scale;
++    let top_left = screen_point_to_cartesian(ScreenPoint::new(
++        preview
++            .screen_position
++            .x
++            .saturating_sub(preview.grab_offset.0),
++        preview
++            .screen_position
++            .y
++            .saturating_sub(preview.grab_offset.1),
++    ));
++    window.setFrame_display_(
++        NSRect::new(
++            NSPoint::new(top_left.x, top_left.y - height),
++            NSSize::new(width, height),
++        ),
++        YES,
++    );
++}
++
++impl Drop for WindowInner {
++    fn drop(&mut self) {
++        if let Some(native) = self.drag_preview.take() {
++            unsafe {
++                native.window.orderOut_(nil);
++                native.window.close();
++            }
++        }
++    }
+ }
+ 
+ fn function_key_to_keycode(function_key: char) -> KeyCode {
+@@ -652,6 +802,7 @@ impl Window {
+                 window,
+                 view,
+                 config: config.clone(),
++                drag_preview: None,
+             }));
+             inner.borrow_mut().window.replace(weak_window);
+             conn.windows
+@@ -787,6 +938,13 @@ impl WindowOps for Window {
+         });
+     }
+ 
++    fn set_tab_drag_preview(&self, preview: Option<TabDragPreview>) {
++        Connection::with_window_inner(self.id, move |inner| {
++            inner.set_tab_drag_preview(preview);
++            Ok(())
++        });
++    }
++
+     fn invalidate(&self) {
+         Connection::with_window_inner(self.id, |inner| {
+             inner.invalidate();
+@@ -830,6 +988,33 @@ impl WindowOps for Window {
          });
      }
  
@@ -1227,7 +1518,70 @@ index 1193d39..79dc65c 100644
      fn set_text_cursor_position(&self, cursor: Rect) {
          Connection::with_window_inner(self.id, move |inner| {
              inner.set_text_cursor_position(cursor);
-@@ -2429,6 +2456,11 @@ impl WindowView {
+@@ -1031,6 +1216,26 @@ fn cursor_icons_use_macos_cursors() {
+     assert_eq!(mouse_icon_selector(CursorIcon::Text), sel!(IBeamCursor));
+ }
+ 
++#[test]
++fn tab_drag_preview_moves_without_rebuilding_its_style() {
++    let preview = TabDragPreview {
++        title: "Codex".to_string(),
++        screen_position: ScreenPoint::new(100, 200),
++        grab_offset: (20, 10),
++        width: 240,
++        height: 40,
++        background: crate::color::SrgbaTuple(0.1, 0.1, 0.1, 1.),
++        foreground: crate::color::SrgbaTuple(1., 1., 1., 1.),
++        font_name: "Hack Nerd Font".to_string(),
++        font_size: 16.,
++    };
++    let mut moved = preview.clone();
++    moved.screen_position = ScreenPoint::new(-300, 900);
++    assert!(tab_drag_preview_style_matches(&preview, &moved));
++    moved.title = "Claude".to_string();
++    assert!(!tab_drag_preview_style_matches(&preview, &moved));
++}
++
+ impl WindowInner {
+     fn enable_opengl(&mut self) -> anyhow::Result<Rc<glium::backend::Context>> {
+         if let Some(window_view) = WindowView::get_this(unsafe { &**self.view }) {
+@@ -1273,6 +1478,35 @@ impl WindowInner {
+         }
+     }
+ 
++    fn set_tab_drag_preview(&mut self, preview: Option<TabDragPreview>) {
++        let Some(preview) = preview else {
++            if let Some(native) = self.drag_preview.take() {
++                unsafe {
++                    native.window.orderOut_(nil);
++                    native.window.close();
++                }
++            }
++            return;
++        };
++
++        unsafe {
++            if self.drag_preview.is_none() {
++                self.drag_preview = Some(NativeTabDragPreview {
++                    window: create_tab_drag_preview_window(&self.window, &preview),
++                    style: preview.clone(),
++                });
++            }
++
++            let native = self.drag_preview.as_mut().unwrap();
++            if !tab_drag_preview_style_matches(&native.style, &preview) {
++                configure_tab_drag_preview_window(&native.window, &preview);
++            }
++            position_tab_drag_preview_window(&native.window, &preview);
++            native.style = preview;
++            let _: () = msg_send![*native.window, orderFrontRegardless];
++        }
++    }
++
+     fn set_cursor(&mut self, cursor: Option<CursorIcon>) {
+         unsafe {
+             let ns_cursor_cls = class!(NSCursor);
+@@ -2429,6 +2663,11 @@ impl WindowView {
      extern "C" fn mouse_down(this: &mut Object, _sel: Sel, nsevent: id) {
          Self::mouse_common(this, nsevent, MouseEventKind::Press(MousePress::Left));
      }
@@ -1239,7 +1593,7 @@ index 1193d39..79dc65c 100644
      extern "C" fn right_mouse_up(this: &mut Object, _sel: Sel, nsevent: id) {
          Self::mouse_common(this, nsevent, MouseEventKind::Release(MousePress::Right));
      }
-@@ -3268,6 +3300,11 @@ impl WindowView {
+@@ -3268,6 +3507,11 @@ impl WindowView {
                  WindowView::dealloc as extern "C" fn(&mut Object, Sel),
              );
  
