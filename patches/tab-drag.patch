@@ -227,6 +227,32 @@ index e100bdb..0596963 100644
      #[test]
      fn tab_splitting() {
          let size = TerminalSize {
+diff --git a/wezterm-gui/src/tabbar.rs b/wezterm-gui/src/tabbar.rs
+index e853c63..06b802c 100644
+--- a/wezterm-gui/src/tabbar.rs
++++ b/wezterm-gui/src/tabbar.rs
+@@ -42,6 +42,21 @@ pub struct TabEntry {
+     width: usize,
+ }
+ 
++impl TabEntry {
++    pub(crate) fn cross_window_drag_preview(title: Line, tab_idx: usize) -> Self {
++        let width = title.len();
++        Self {
++            item: TabBarItem::Tab {
++                tab_idx,
++                active: true,
++            },
++            title,
++            x: 0,
++            width,
++        }
++    }
++}
++
+ #[derive(Clone, Debug)]
+ struct TitleText {
+     items: Vec<FormatItem>,
 diff --git a/wezterm-gui/src/termwindow/box_model.rs b/wezterm-gui/src/termwindow/box_model.rs
 index 9edfe33..cb547dd 100644
 --- a/wezterm-gui/src/termwindow/box_model.rs
@@ -274,10 +300,10 @@ index 9edfe33..cb547dd 100644
              }
              ComputedElementContent::Poly { poly, line_width } => {
 diff --git a/wezterm-gui/src/termwindow/keyevent.rs b/wezterm-gui/src/termwindow/keyevent.rs
-index d669080..ac7e7f1 100644
+index d669080..3e5e462 100644
 --- a/wezterm-gui/src/termwindow/keyevent.rs
 +++ b/wezterm-gui/src/termwindow/keyevent.rs
-@@ -597,6 +597,18 @@ impl super::TermWindow {
+@@ -597,6 +597,19 @@ impl super::TermWindow {
      }
  
      pub fn key_event_impl(&mut self, window_key: KeyEvent, context: &dyn WindowOps) {
@@ -285,6 +311,7 @@ index d669080..ac7e7f1 100644
 +            && window_key.key_is_down
 +            && window_key.key == ::window::KeyCode::Char('\u{1b}')
 +        {
++            self.clear_cross_window_tab_drag();
 +            self.dragging = None;
 +            self.dragging_tab_id = None;
 +            self.dragging_tab_grab_offset = None;
@@ -297,7 +324,7 @@ index d669080..ac7e7f1 100644
              Some(pane) => pane,
              None => return,
 diff --git a/wezterm-gui/src/termwindow/mod.rs b/wezterm-gui/src/termwindow/mod.rs
-index 27567d9..9b5da62 100644
+index 27567d9..785aea8 100644
 --- a/wezterm-gui/src/termwindow/mod.rs
 +++ b/wezterm-gui/src/termwindow/mod.rs
 @@ -83,6 +83,7 @@ pub mod render;
@@ -324,10 +351,11 @@ index 27567d9..9b5da62 100644
  
      modal: RefCell<Option<Rc<dyn Modal>>>,
  
-@@ -533,6 +543,10 @@ impl TermWindow {
+@@ -533,6 +543,11 @@ impl TermWindow {
          self.load_os_parameters();
  
          if self.focused.is_none() {
++            self.clear_cross_window_tab_drag();
 +            self.dragging = None;
 +            self.dragging_tab_grab_offset = None;
 +            self.dragging_tab_id = None;
@@ -335,7 +363,7 @@ index 27567d9..9b5da62 100644
              self.last_mouse_click = None;
              self.current_mouse_buttons.clear();
              self.current_mouse_capture = None;
-@@ -788,6 +802,9 @@ impl TermWindow {
+@@ -788,6 +803,9 @@ impl TermWindow {
              semantic_zones: HashMap::new(),
              ui_items: vec![],
              dragging: None,
@@ -346,18 +374,19 @@ index 27567d9..9b5da62 100644
              is_click_to_focus_window: false,
              key_table_state: KeyTableState::default(),
 diff --git a/wezterm-gui/src/termwindow/mouseevent.rs b/wezterm-gui/src/termwindow/mouseevent.rs
-index f7fefd0..03bd69b 100644
+index f7fefd0..7021981 100644
 --- a/wezterm-gui/src/termwindow/mouseevent.rs
 +++ b/wezterm-gui/src/termwindow/mouseevent.rs
-@@ -1,3 +1,7 @@
+@@ -1,3 +1,8 @@
 +use super::render::fancy_tab_bar::clone_tab_element;
 +use super::tab_drag::{
-+    screen_point_is_in_tab_bar, tab_drag_has_started, tab_drag_should_detach, tab_drag_target,
++    screen_point_is_in_window, set_cross_window_tab_drag, tab_drag_has_started,
++    tab_drag_should_detach, tab_drag_target,
 +};
  use crate::tabbar::TabBarItem;
  use crate::termwindow::{
      GuiWin, MouseCapture, PositionedSplit, ScrollHit, TermWindowNotif, UIItem, UIItemType, TMB,
-@@ -129,9 +133,57 @@ impl super::TermWindow {
+@@ -129,9 +134,59 @@ impl super::TermWindow {
                      // Completed a window drag
                      return;
                  }
@@ -365,12 +394,14 @@ index f7fefd0..03bd69b 100644
 -                    // Completed a drag
 -                    return;
 +                if press == &MousePress::Left {
++                    let destination = self.tab_drop_target(&event);
++                    self.update_cross_window_tab_drag(None);
 +                    if let Some((item, _)) = self.dragging.take() {
 +                        let tab_id = self.dragging_tab_id.take();
 +                        let grab = self.dragging_tab_grab_offset.take();
 +                        self.dragging_tab_snapshot = None;
 +                        if let (Some(tab_id), Some((grab_x, grab_y))) = (tab_id, grab) {
-+                            if let Some(destination) = self.tab_drop_target(&event) {
++                            if let Some(destination) = destination {
 +                                match Mux::get()
 +                                    .move_tab_to_window(tab_id, destination.mux_window_id)
 +                                {
@@ -418,13 +449,15 @@ index f7fefd0..03bd69b 100644
                  }
              }
  
-@@ -332,6 +384,115 @@ impl super::TermWindow {
+@@ -332,6 +387,160 @@ impl super::TermWindow {
          self.dragging.replace((item, start_event));
      }
  
-+    /// Find another visible WezTerm window whose tab strip is beneath the
-+    /// pointer. The current client rect is excluded so overlapping windows do
-+    /// not turn an ordinary in-window reorder into a cross-window move.
++    /// Find another visible WezTerm window beneath the pointer. The entire
++    /// destination window is a magnetic target, so joining works equally well
++    /// above, below, or beside the source without precisely aiming at a strip.
++    /// The current client rect is excluded so an overlapping window never
++    /// turns an ordinary in-window reorder into a cross-window move.
 +    fn tab_drop_target(&self, event: &MouseEvent) -> Option<GuiWin> {
 +        if event.coords.x >= 0
 +            && event.coords.x < self.dimensions.pixel_width as isize
@@ -434,7 +467,6 @@ index f7fefd0..03bd69b 100644
 +            return None;
 +        }
 +
-+        let tab_height = self.tab_bar_pixel_height().ok()?.ceil() as isize;
 +        super::front_end()
 +            .gui_windows()
 +            .into_iter()
@@ -445,13 +477,55 @@ index f7fefd0..03bd69b 100644
 +                let Some(rect) = candidate.window.get_window_rect() else {
 +                    return false;
 +                };
-+                screen_point_is_in_tab_bar(
++                screen_point_is_in_window(
 +                    (event.screen_coords.x, event.screen_coords.y),
 +                    (rect.min_x(), rect.min_y(), rect.width(), rect.height()),
-+                    tab_height,
-+                    self.config.tab_bar_at_bottom,
 +                )
 +            })
++    }
++
++    fn update_cross_window_tab_drag(&self, destination: Option<&GuiWin>) {
++        let title = self.dragging.as_ref().and_then(|(item, _)| {
++            let tab_idx = match item.item_type {
++                UIItemType::TabBar(TabBarItem::Tab { tab_idx, .. }) => tab_idx,
++                _ => return None,
++            };
++            self.tab_bar
++                .items()
++                .iter()
++                .find(|entry| {
++                    matches!(entry.item, TabBarItem::Tab { tab_idx: idx, .. } if idx == tab_idx)
++                })
++                .map(|entry| entry.title.clone())
++        });
++        let destination = destination
++            .and_then(|destination| title.map(|title| (destination.mux_window_id, title)));
++        let (previous, next) = set_cross_window_tab_drag(self.mux_window_id, destination);
++
++        if previous == next {
++            return;
++        }
++
++        for window_id in [previous, next].iter().flatten() {
++            if let Some(gui_window) = super::front_end()
++                .gui_windows()
++                .into_iter()
++                .find(|window| window.mux_window_id == *window_id)
++            {
++                gui_window
++                    .window
++                    .notify(TermWindowNotif::Apply(Box::new(|term_window| {
++                        term_window.invalidate_fancy_tab_bar();
++                        if let Some(window) = &term_window.window {
++                            window.invalidate();
++                        }
++                    })));
++            }
++        }
++    }
++
++    pub(crate) fn clear_cross_window_tab_drag(&self) {
++        self.update_cross_window_tab_drag(None);
 +    }
 +
 +    fn drag_reorder_tab(
@@ -488,7 +562,9 @@ index f7fefd0..03bd69b 100644
 +                });
 +        }
 +
-+        if self.tab_drop_target(&event).is_some() {
++        let destination = self.tab_drop_target(&event);
++        self.update_cross_window_tab_drag(destination.as_ref());
++        if destination.is_some() {
 +            context.set_cursor(Some(CursorIcon::Alias));
 +            self.dragging.replace((item, event));
 +            context.invalidate();
@@ -534,7 +610,7 @@ index f7fefd0..03bd69b 100644
      fn drag_ui_item(
          &mut self,
          item: UIItem,
-@@ -348,6 +509,9 @@ impl super::TermWindow {
+@@ -348,6 +557,9 @@ impl super::TermWindow {
              UIItemType::ScrollThumb => {
                  self.drag_scroll_thumb(item, start_event, event, context);
              }
@@ -544,7 +620,7 @@ index f7fefd0..03bd69b 100644
              _ => {
                  log::error!("drag not implemented for {:?}", item);
              }
-@@ -364,8 +528,8 @@ impl super::TermWindow {
+@@ -364,8 +576,8 @@ impl super::TermWindow {
      ) {
          self.last_ui_item.replace(item.clone());
          match item.item_type {
@@ -555,7 +631,7 @@ index f7fefd0..03bd69b 100644
              }
              UIItemType::AboveScrollThumb => {
                  self.mouse_event_above_scroll_thumb(item, pane, event, context);
-@@ -455,14 +619,26 @@ impl super::TermWindow {
+@@ -455,14 +667,26 @@ impl super::TermWindow {
  
      pub fn mouse_event_tab_bar(
          &mut self,
@@ -584,7 +660,7 @@ index f7fefd0..03bd69b 100644
                  }
                  TabBarItem::NewTabButton { .. } => {
                      self.do_new_tab_button_click(MousePress::Left);
-@@ -510,7 +686,7 @@ impl super::TermWindow {
+@@ -510,7 +734,7 @@ impl super::TermWindow {
                      }
                  }
              },
@@ -593,7 +669,7 @@ index f7fefd0..03bd69b 100644
                  TabBarItem::Tab { tab_idx, .. } => {
                      self.close_specific_tab(tab_idx, true);
                  }
-@@ -522,7 +698,7 @@ impl super::TermWindow {
+@@ -522,7 +746,7 @@ impl super::TermWindow {
                  | TabBarItem::RightStatus
                  | TabBarItem::WindowButton(_) => {}
              },
@@ -602,7 +678,7 @@ index f7fefd0..03bd69b 100644
                  TabBarItem::Tab { .. } => {
                      self.show_tab_navigator();
                  }
-@@ -534,7 +710,7 @@ impl super::TermWindow {
+@@ -534,7 +758,7 @@ impl super::TermWindow {
                  | TabBarItem::RightStatus
                  | TabBarItem::WindowButton(_) => {}
              },
@@ -612,18 +688,68 @@ index f7fefd0..03bd69b 100644
                      context.set_window_drag_position(event.screen_coords);
                  }
 diff --git a/wezterm-gui/src/termwindow/render/fancy_tab_bar.rs b/wezterm-gui/src/termwindow/render/fancy_tab_bar.rs
-index 2474e2d..e23270c 100644
+index 2474e2d..94918fa 100644
 --- a/wezterm-gui/src/termwindow/render/fancy_tab_bar.rs
 +++ b/wezterm-gui/src/termwindow/render/fancy_tab_bar.rs
-@@ -2,6 +2,7 @@ use crate::customglyph::*;
+@@ -2,6 +2,10 @@ use crate::customglyph::*;
  use crate::tabbar::{TabBarItem, TabEntry};
  use crate::termwindow::box_model::*;
  use crate::termwindow::render::corners::*;
-+use crate::termwindow::tab_drag::dragged_tab_left;
++use crate::termwindow::tab_drag::{
++    cross_window_tab_drag_for, dragged_tab_left, has_cross_window_tab_drag_from,
++    CROSS_WINDOW_DRAG_PREVIEW_TAB_IDX,
++};
  
  use crate::termwindow::render::window_buttons::window_button_element;
  use crate::termwindow::{UIItem, UIItemType};
-@@ -528,13 +529,149 @@ impl crate::TermWindow {
+@@ -59,7 +63,25 @@ impl crate::TermWindow {
+         let tab_bar_height = self.tab_bar_pixel_height()?;
+         let font = self.fonts.title_font()?;
+         let metrics = RenderMetrics::with_font_metrics(&font.metrics());
+-        let items = self.tab_bar.items();
++        let mut items = self.tab_bar.items().to_vec();
++        if let Some(preview) = cross_window_tab_drag_for(self.mux_window_id) {
++            for item in &mut items {
++                if let TabBarItem::Tab { active, .. } = &mut item.item {
++                    *active = false;
++                }
++            }
++            let insert_at = items
++                .iter()
++                .position(|item| matches!(item.item, TabBarItem::NewTabButton))
++                .unwrap_or(items.len());
++            items.insert(
++                insert_at,
++                TabEntry::cross_window_drag_preview(
++                    preview.title,
++                    CROSS_WINDOW_DRAG_PREVIEW_TAB_IDX,
++                ),
++            );
++        }
+         let colors = self
+             .config
+             .colors
+@@ -391,7 +413,7 @@ impl crate::TermWindow {
+             );
+         }
+ 
+-        for item in items {
++        for item in &items {
+             match item.item {
+                 TabBarItem::LeftStatus => left_status.push(item_to_elem(item)),
+                 TabBarItem::None | TabBarItem::RightStatus => right_eles.push(item_to_elem(item)),
+@@ -411,7 +433,9 @@ impl crate::TermWindow {
+                         ElementContent::Text(_) => unreachable!(),
+                         ElementContent::Poly { .. } => unreachable!(),
+                         ElementContent::Children(mut kids) => {
+-                            if self.config.show_close_tab_button_in_tabs {
++                            if self.config.show_close_tab_button_in_tabs
++                                && tab_idx != CROSS_WINDOW_DRAG_PREVIEW_TAB_IDX
++                            {
+                                 kids.push(make_x_button(&font, &metrics, &colors, tab_idx, active));
+                             }
+                             ElementContent::Children(kids)
+@@ -528,13 +552,152 @@ impl crate::TermWindow {
          let computed = self.fancy_tab_bar.as_ref().ok_or_else(|| {
              anyhow::anyhow!("paint_fancy_tab_bar called but fancy_tab_bar is None")
          })?;
@@ -648,6 +774,9 @@ index 2474e2d..e23270c 100644
 +
 +    /// Return the stable tab snapshot translated under the live pointer.
 +    fn dragged_tab_preview(&self, computed: &ComputedElement) -> Option<(usize, ComputedElement)> {
++        if has_cross_window_tab_drag_from(self.mux_window_id) {
++            return None;
++        }
 +        let (drag_item, drag_event) = self.dragging.as_ref()?;
 +        let tab_idx = match &drag_item.item_type {
 +            UIItemType::TabBar(TabBarItem::Tab { tab_idx, .. }) => *tab_idx,
@@ -774,7 +903,7 @@ index 2474e2d..e23270c 100644
  }
  
  fn make_x_button(
-@@ -584,10 +721,10 @@ fn make_x_button(
+@@ -584,10 +747,10 @@ fn make_x_button(
          })
      })
      .padding(BoxDimension {
@@ -791,11 +920,72 @@ index 2474e2d..e23270c 100644
          left: Dimension::Cells(0.5),
 diff --git a/wezterm-gui/src/termwindow/tab_drag.rs b/wezterm-gui/src/termwindow/tab_drag.rs
 new file mode 100644
-index 0000000..3d37066
+index 0000000..5e64916
 --- /dev/null
 +++ b/wezterm-gui/src/termwindow/tab_drag.rs
-@@ -0,0 +1,162 @@
+@@ -0,0 +1,236 @@
++use mux::window::WindowId;
++use std::cell::RefCell;
++use wezterm_term::Line;
++
 +const DRAG_THRESHOLD: isize = 4;
++pub(crate) const CROSS_WINDOW_DRAG_PREVIEW_TAB_IDX: usize = usize::MAX;
++
++#[derive(Clone)]
++pub(crate) struct CrossWindowTabDrag {
++    pub(crate) source_window_id: WindowId,
++    pub(crate) destination_window_id: WindowId,
++    pub(crate) title: Line,
++}
++
++thread_local! {
++    static CROSS_WINDOW_TAB_DRAG: RefCell<Option<CrossWindowTabDrag>> = const {
++        RefCell::new(None)
++    };
++}
++
++pub(crate) fn cross_window_tab_drag_for(
++    destination_window_id: WindowId,
++) -> Option<CrossWindowTabDrag> {
++    CROSS_WINDOW_TAB_DRAG.with(|drag| {
++        drag.borrow()
++            .as_ref()
++            .filter(|drag| drag.destination_window_id == destination_window_id)
++            .cloned()
++    })
++}
++
++pub(crate) fn has_cross_window_tab_drag_from(source_window_id: WindowId) -> bool {
++    CROSS_WINDOW_TAB_DRAG.with(|drag| {
++        drag.borrow()
++            .as_ref()
++            .is_some_and(|drag| drag.source_window_id == source_window_id)
++    })
++}
++
++pub(crate) fn set_cross_window_tab_drag(
++    source_window_id: WindowId,
++    destination: Option<(WindowId, Line)>,
++) -> (Option<WindowId>, Option<WindowId>) {
++    CROSS_WINDOW_TAB_DRAG.with(|drag| {
++        let mut drag = drag.borrow_mut();
++        let previous = drag
++            .as_ref()
++            .filter(|drag| drag.source_window_id == source_window_id)
++            .map(|drag| drag.destination_window_id);
++        let next = destination.as_ref().map(|(window_id, _)| *window_id);
++
++        if previous != next {
++            *drag = destination.map(|(destination_window_id, title)| CrossWindowTabDrag {
++                source_window_id,
++                destination_window_id,
++                title,
++            });
++        }
++
++        (previous, next)
++    })
++}
 +
 +/// Ignore tiny pointer jitter so an ordinary click remains visually still.
 +pub(crate) fn tab_drag_has_started(
@@ -815,29 +1005,21 @@ index 0000000..3d37066
 +        || pointer_y > tab_top.saturating_add(tab_height).saturating_add(margin)
 +}
 +
-+/// Whether a screen-coordinate pointer is over the tab strip of a window.
-+/// Kept independent of a window backend so the edge and bottom-bar behavior
-+/// can be tested without opening native windows.
-+pub(crate) fn screen_point_is_in_tab_bar(
++/// Whether a screen-coordinate pointer is over a visible window. A whole-window
++/// target is intentionally generous: once a tab has left its source window,
++/// any part of another WezTerm window acts as a magnetic join target.
++pub(crate) fn screen_point_is_in_window(
 +    point: (isize, isize),
 +    window: (isize, isize, isize, isize),
-+    tab_height: isize,
-+    tab_bar_at_bottom: bool,
 +) -> bool {
 +    let (x, y, width, height) = window;
-+    if width <= 0 || height <= 0 || tab_height <= 0 {
++    if width <= 0 || height <= 0 {
 +        return false;
 +    }
-+    let tab_height = tab_height.min(height);
-+    let tab_top = if tab_bar_at_bottom {
-+        y.saturating_add(height).saturating_sub(tab_height)
-+    } else {
-+        y
-+    };
 +    point.0 >= x
 +        && point.0 < x.saturating_add(width)
-+        && point.1 >= tab_top
-+        && point.1 < tab_top.saturating_add(tab_height)
++        && point.1 >= y
++        && point.1 < y.saturating_add(height)
 +}
 +
 +/// Keep the floating tab inside the tab bar while retaining the grab offset.
@@ -876,9 +1058,13 @@ index 0000000..3d37066
 +#[cfg(test)]
 +mod tests {
 +    use super::{
-+        dragged_tab_left, screen_point_is_in_tab_bar, tab_drag_has_started, tab_drag_should_detach,
-+        tab_drag_target,
++        cross_window_tab_drag_for, dragged_tab_left, has_cross_window_tab_drag_from,
++        screen_point_is_in_window, set_cross_window_tab_drag, tab_drag_has_started,
++        tab_drag_should_detach, tab_drag_target,
 +    };
++    use termwiz::cell::CellAttributes;
++    use termwiz::surface::SEQ_ZERO;
++    use wezterm_term::Line;
 +
 +    const TABS: [(usize, usize, usize); 4] =
 +        [(0, 100, 100), (1, 200, 100), (2, 300, 100), (3, 400, 100)];
@@ -946,15 +1132,32 @@ index 0000000..3d37066
 +    }
 +
 +    #[test]
-+    fn identifies_top_and_bottom_tab_bar_drop_targets() {
++    fn identifies_the_whole_window_as_a_drop_target() {
 +        let window = (-200, 100, 800, 600);
-+        assert!(screen_point_is_in_tab_bar((-200, 100), window, 40, false));
-+        assert!(screen_point_is_in_tab_bar((599, 139), window, 40, false));
-+        assert!(!screen_point_is_in_tab_bar((600, 120), window, 40, false));
-+        assert!(!screen_point_is_in_tab_bar((100, 140), window, 40, false));
-+        assert!(screen_point_is_in_tab_bar((100, 699), window, 40, true));
-+        assert!(!screen_point_is_in_tab_bar((100, 659), window, 40, true));
-+        assert!(!screen_point_is_in_tab_bar((0, 0), (0, 0, 0, 0), 40, false));
++        assert!(screen_point_is_in_window((-200, 100), window));
++        assert!(screen_point_is_in_window((599, 699), window));
++        assert!(screen_point_is_in_window((100, 400), window));
++        assert!(!screen_point_is_in_window((600, 120), window));
++        assert!(!screen_point_is_in_window((100, 700), window));
++        assert!(!screen_point_is_in_window((0, 0), (0, 0, 0, 0)));
++    }
++
++    #[test]
++    fn tracks_and_clears_the_destination_preview_by_source_window() {
++        let title = Line::from_text("Codex", &CellAttributes::default(), SEQ_ZERO, None);
++        assert_eq!(
++            set_cross_window_tab_drag(7, Some((9, title))),
++            (None, Some(9))
++        );
++        let preview = cross_window_tab_drag_for(9).unwrap();
++        assert_eq!(preview.source_window_id, 7);
++        assert_eq!(preview.title.as_str(), "Codex");
++        assert!(has_cross_window_tab_drag_from(7));
++
++        assert_eq!(set_cross_window_tab_drag(8, None), (None, None));
++        assert!(cross_window_tab_drag_for(9).is_some());
++        assert_eq!(set_cross_window_tab_drag(7, None), (Some(9), None));
++        assert!(cross_window_tab_drag_for(9).is_none());
 +    }
 +}
 diff --git a/window/src/lib.rs b/window/src/lib.rs
