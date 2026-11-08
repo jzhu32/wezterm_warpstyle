@@ -132,9 +132,10 @@ at that pinned upstream version.
 Pulling a tab well above or below the tab strip and releasing moves the whole
 tab into a new window. Its programs, split layout and name stay intact. A move
 cursor indicates that release will create a window. Press Esc to cancel, or
-bring it back into the strip to keep reordering. The command palette also has
-**Move this tab to a new window**. This creates separate windows; dragging a tab
-into another existing window is not implemented.
+bring it back into the strip to keep reordering. Dragging it onto the tab strip
+of another WezTerm window joins it to that window and activates it there; the
+alias cursor confirms the destination before release. The command palette also
+has **Move this tab to a new window**.
 
 The app is built and signed locally, without an Apple notarization certificate.
 Source, compiled files and app backups stay in the ignored `.build/` folder;
@@ -361,7 +362,8 @@ After installing a changed native patch, manually check dragging in both
 directions, grabbing near either edge, keeping the label visible, a fast move
 across several tabs, switching tabs, pulling a split tab into a new window,
 cancelling with Esc, the close and `+` buttons, and dragging the empty part
-of the bar to move the window.
+of the bar to move the window. Also detach a tab, then drag it onto the tab
+strip of the original window to confirm that it rejoins with its panes intact.
 
 This drives a real zsh through every editing feature, runs the logic in
 `wezterm.lua` against a stand-in for WezTerm, and starts WezTerm's own engine
