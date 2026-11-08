@@ -122,8 +122,10 @@ with fixes for fast moves, cancelling a drag when the window loses focus, and
 macOS passing tab drags through to the window. The dragged tab keeps a stable
 snapshot of its label, follows the exact point where it was grabbed, and swaps
 only when its center crosses a neighboring tab. A small movement threshold
-keeps ordinary clicks still. The rest of the app stays at that pinned upstream
-version.
+keeps ordinary clicks still. Once started, the preview stays visible until
+release, including when the pointer returns to its starting point. The title
+and close button move above the other tabs together. The rest of the app stays
+at that pinned upstream version.
 
 The app is built and signed locally, without an Apple notarization certificate.
 Source, compiled files and app backups stay in the ignored `.build/` folder;
@@ -299,8 +301,9 @@ window change.
 python3 tests/run.py
 ```
 
-`./build-wezterm.sh` also runs the native drag boundary tests, checks the app's
-signature and configuration, and rejects binaries linked to Homebrew libraries.
+`./build-wezterm.sh` also runs native drag and renderer regression tests without
+opening a window, checks the app's signature and configuration, and rejects
+binaries linked to Homebrew libraries.
 After installing a changed native patch, manually check dragging in both
 directions, grabbing near either edge, keeping the label visible, a fast move
 across several tabs, switching tabs, the close and `+` buttons, and dragging

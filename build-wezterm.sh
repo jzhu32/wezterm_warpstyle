@@ -39,8 +39,7 @@ if [[ ! -r $built_app/$marker || $(<$built_app/$marker) != $stamp ]]; then
     cd "$source_dir"
     export CARGO_TARGET_DIR=$build/target OPENSSL_DIR=$openssl_dir OPENSSL_STATIC=1 LIBGIT2_NO_PKG_CONFIG=1
     print -r -- '20261026-082628-e68a8ec2-warpstyle-tab-drag' > .tag
-    rustc --edition=2021 --test wezterm-gui/src/termwindow/tab_drag.rs -o "$build/tab-drag-tests"
-    "$build/tab-drag-tests"
+    cargo test --locked --release -p wezterm-gui --bin wezterm-gui tab_drag
     cargo build --locked --release -p wezterm-gui -p wezterm -p wezterm-mux-server -p strip-ansi-escapes
   )
 
@@ -113,4 +112,4 @@ ln -sfn "$app/Contents/Resources/shell-completion/bash" "$prefix/etc/bash_comple
 ln -sfn "$app/Contents/Resources/shell-completion/zsh" "$prefix/share/zsh/site-functions/_wezterm"
 ln -sfn "$app/Contents/Resources/shell-completion/fish" "$prefix/share/fish/vendor_completions.d/wezterm.fish"
 "$app/Contents/MacOS/wezterm" --version
-print 'Installed. Quit WezTerm and reopen it to use tab dragging.'
+print 'Installed. Save terminal work, press Cmd+Q to fully quit WezTerm, then reopen it.'
