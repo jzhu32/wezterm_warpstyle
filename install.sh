@@ -17,9 +17,11 @@ if [[ $1 != --no-brew ]]; then
     print "Homebrew is needed first. Install it from https://brew.sh, then run this again."
     exit 1
   fi
-  say "Installing WezTerm, the font and the shell tools with Homebrew"
-  # --no-upgrade: only add what is missing, never replace an app you are using.
-  brew bundle --file=$repo/Brewfile --no-upgrade
+  say "Installing the build tools, font and shell tools with Homebrew"
+  # Keep unrelated packages as they are; the pinned WezTerm is built below.
+  HOMEBREW_NO_INSTALLED_DEPENDENTS_CHECK=1 HOMEBREW_NO_INSTALL_CLEANUP=1 \
+    brew bundle --file=$repo/Brewfile --no-upgrade
+  "$repo/build-wezterm.sh" --install
 fi
 
 # ---- Config files -----------------------------------------------------------

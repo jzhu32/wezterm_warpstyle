@@ -269,11 +269,11 @@ check("a plain click hands over nothing", #w.sent, 0)
 
 local title = events["format-tab-title"]
 -- A window 116 characters wide plus padding, holding `count` tabs.
-local function tab_items(index, active, p, count)
+local function tab_items(index, active, p, count, max_width, columns)
   local all = {}
   for i = 1, count or 2 do all[i] = {} end
   return title({ tab_title = p.tab_title or "", tab_index = index, is_active = active, active_pane = p },
-    all, { { left = 0, width = 58 }, { left = 58, width = 58 } }, nil, nil, 48)
+    all, { { left = 0, width = columns or 116 } }, nil, nil, max_width or 48)
 end
 local function tab(index, active, p, count)
   return flatten(tab_items(index, active, p, count))
@@ -315,7 +315,14 @@ check("tab: a long branch takes only the room that is left",
 check("tab: folders near the top of the disk are shown whole",
   squeeze(tab(0, false, { current_working_dir = dir_at and dir_at("/usr/local") or (function() local u = newproxy(true); getmetatable(u).__index = { file_path = "/usr/local" }; return u end)(), foreground_process_name = "/bin/zsh", title = "", user_vars = { WEZ_ZLE = "1" } })),
   "  \u{f413} /usr/local  ⌘1 ")
-check("tab: tenth tab has no shortcut", squeeze(tab(9, true, home_tab)), "  \u{f413} ~  ")
+check("tab: cmd+9 labels the last tab even with ten tabs", flatten(tab_items(9, true, home_tab, 10, 48, 500)):find("⌘9", 1, true) ~= nil, true)
+check("tab: the ninth tab does not claim cmd+9 when another follows", flatten(tab_items(8, true, home_tab, 10, 48, 500)):find("⌘9", 1, true), nil)
+local fits = true
+for width = 0, 8 do
+  local items = tab_items(0, true, { tab_title = "a very long name", user_vars = {} }, 2, width)
+  fits = fits and #chars(flatten(items)) <= width
+end
+check("tab titles fit even when the bar allows only zero to eight cells", fits, true)
 
 local function colors_of(items)
   local found = {}

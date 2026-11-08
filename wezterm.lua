@@ -289,8 +289,10 @@ end
 -- tab in front gets color; one that rang the bell is tinted until you look.
 wezterm.on("format-tab-title", function(tab, tabs, panes, _, _, max_width)
   local pane = tab.active_pane
-  local width = math.min(tab_width(tabs and #tabs or 1, panes), max_width)
-  local shortcut = (tab.tab_index < 9 and width >= 16) and ("⌘" .. tab.tab_index + 1) or ""
+  local width = math.max(0, math.min(tab_width(tabs and #tabs or 1, panes), max_width))
+  local number = tab.tab_index < 8 and tab.tab_index + 1
+    or (tabs and tab.tab_index == #tabs - 1 and 9)
+  local shortcut = (number and width >= 16) and ("⌘" .. number) or ""
 
   local needs_you = false
   if not tab.is_active then
@@ -303,6 +305,10 @@ wezterm.on("format-tab-title", function(tab, tabs, panes, _, _, max_width)
   -- 2 before the name, 1 after the shortcut, 2 between them at the least.
   local room = width - 3 - wezterm.column_width(dot) - (shortcut ~= "" and wezterm.column_width(shortcut) + 2 or 0)
   local icon, label, branch = tab_label(tab.tab_title, pane, math.max(room, 4))
+  -- At very small widths, make room for the name before decoration.
+  if width < 8 then
+    return { { Text = width > 0 and keep_start(dot .. label, width) or "" } }
+  end
   icon = icon ~= "" and (icon .. " ") or ""
   branch = branch and ("  \u{f418} " .. branch) or ""
   local used = 2 + wezterm.column_width(dot .. icon .. label .. branch) + wezterm.column_width(shortcut) + 1

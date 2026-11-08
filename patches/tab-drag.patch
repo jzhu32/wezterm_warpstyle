@@ -1,0 +1,340 @@
+diff --git a/docs/config/lua/keyassignment/MoveTabRelative.md b/docs/config/lua/keyassignment/MoveTabRelative.md
+index ce9e392..22dea43 100644
+--- a/docs/config/lua/keyassignment/MoveTabRelative.md
++++ b/docs/config/lua/keyassignment/MoveTabRelative.md
+@@ -4,6 +4,8 @@ Move the current tab relative to its peers.  The argument specifies an
+ offset. eg: `-1` moves the tab to the left of the current tab, while `1` moves
+ the tab to the right.
+ 
++It is also possible to reorder tabs via left mouse drag on the tab bar entry.
++
+ ```lua
+ local act = wezterm.action
+ 
+diff --git a/wezterm-gui/src/termwindow/mod.rs b/wezterm-gui/src/termwindow/mod.rs
+index 27567d9..56b6e3f 100644
+--- a/wezterm-gui/src/termwindow/mod.rs
++++ b/wezterm-gui/src/termwindow/mod.rs
+@@ -76,6 +76,7 @@ pub mod clipboard;
+ pub mod keyevent;
+ pub mod modal;
+ mod mouseevent;
++mod tab_drag;
+ pub mod palette;
+ pub mod paneselect;
+ mod prevcursor;
+@@ -444,6 +445,10 @@ pub struct TermWindow {
+ 
+     ui_items: Vec<UIItem>,
+     dragging: Option<(UIItem, MouseEvent)>,
++    /// Pixel offset from the dragged tab's left edge to the mouse cursor,
++    /// captured at the start of a tab-bar drag so the floating preview
++    /// tracks the cursor without snapping.
++    dragging_tab_start_offset: Option<isize>,
+ 
+     modal: RefCell<Option<Rc<dyn Modal>>>,
+ 
+@@ -533,6 +538,8 @@ impl TermWindow {
+         self.load_os_parameters();
+ 
+         if self.focused.is_none() {
++            self.dragging = None;
++            self.dragging_tab_start_offset = None;
+             self.last_mouse_click = None;
+             self.current_mouse_buttons.clear();
+             self.current_mouse_capture = None;
+@@ -788,6 +795,7 @@ impl TermWindow {
+             semantic_zones: HashMap::new(),
+             ui_items: vec![],
+             dragging: None,
++            dragging_tab_start_offset: None,
+             last_ui_item: None,
+             is_click_to_focus_window: false,
+             key_table_state: KeyTableState::default(),
+diff --git a/wezterm-gui/src/termwindow/mouseevent.rs b/wezterm-gui/src/termwindow/mouseevent.rs
+index f7fefd0..ff2c107 100644
+--- a/wezterm-gui/src/termwindow/mouseevent.rs
++++ b/wezterm-gui/src/termwindow/mouseevent.rs
+@@ -1,4 +1,5 @@
+ use crate::tabbar::TabBarItem;
++use super::tab_drag::tab_drag_target;
+ use crate::termwindow::{
+     GuiWin, MouseCapture, PositionedSplit, ScrollHit, TermWindowNotif, UIItem, UIItemType, TMB,
+ };
+@@ -131,6 +132,8 @@ impl super::TermWindow {
+                 }
+                 if press == &MousePress::Left && self.dragging.take().is_some() {
+                     // Completed a drag
++                    self.dragging_tab_start_offset = None;
++                    context.invalidate();
+                     return;
+                 }
+             }
+@@ -332,6 +335,33 @@ impl super::TermWindow {
+         self.dragging.replace((item, start_event));
+     }
+ 
++    fn drag_reorder_tab(
++        &mut self,
++        mut item: UIItem,
++        tab_idx: usize,
++        event: MouseEvent,
++        context: &dyn WindowOps,
++    ) {
++        let bounds = self.ui_items.iter().filter_map(|item| match item.item_type {
++            UIItemType::TabBar(TabBarItem::Tab { tab_idx, .. }) => {
++                Some((tab_idx, item.x, item.width))
++            }
++            _ => None,
++        });
++        let target = tab_drag_target(tab_idx, event.coords.x, bounds);
++        if target != tab_idx && self.move_tab(target).is_ok() {
++            item.item_type = UIItemType::TabBar(TabBarItem::Tab {
++                tab_idx: target,
++                active: true,
++            });
++        }
++
++        self.dragging.replace((item, event));
++        // The floating drag preview tracks the live cursor position, so
++        // every move needs a repaint, not just moves that trigger a swap.
++        context.invalidate();
++    }
++
+     fn drag_ui_item(
+         &mut self,
+         item: UIItem,
+@@ -348,6 +378,9 @@ impl super::TermWindow {
+             UIItemType::ScrollThumb => {
+                 self.drag_scroll_thumb(item, start_event, event, context);
+             }
++            UIItemType::TabBar(TabBarItem::Tab { tab_idx, .. }) => {
++                self.drag_reorder_tab(item, tab_idx, event, context);
++            }
+             _ => {
+                 log::error!("drag not implemented for {:?}", item);
+             }
+@@ -364,8 +397,8 @@ impl super::TermWindow {
+     ) {
+         self.last_ui_item.replace(item.clone());
+         match item.item_type {
+-            UIItemType::TabBar(item) => {
+-                self.mouse_event_tab_bar(item, event, context);
++            UIItemType::TabBar(tab_bar_item) => {
++                self.mouse_event_tab_bar(item, tab_bar_item, event, context);
+             }
+             UIItemType::AboveScrollThumb => {
+                 self.mouse_event_above_scroll_thumb(item, pane, event, context);
+@@ -455,14 +488,18 @@ impl super::TermWindow {
+ 
+     pub fn mouse_event_tab_bar(
+         &mut self,
+-        item: TabBarItem,
++        item: UIItem,
++        tab_bar_item: TabBarItem,
+         event: MouseEvent,
+         context: &dyn WindowOps,
+     ) {
+         match event.kind {
+-            WMEK::Press(MousePress::Left) => match item {
++            WMEK::Press(MousePress::Left) => match tab_bar_item {
+                 TabBarItem::Tab { tab_idx, .. } => {
+                     self.activate_tab(tab_idx as isize).ok();
++                    // For reordering tabs
++                    self.dragging_tab_start_offset = Some(event.coords.x - item.x as isize);
++                    self.dragging = Some((item, event));
+                 }
+                 TabBarItem::NewTabButton { .. } => {
+                     self.do_new_tab_button_click(MousePress::Left);
+@@ -510,7 +547,7 @@ impl super::TermWindow {
+                     }
+                 }
+             },
+-            WMEK::Press(MousePress::Middle) => match item {
++            WMEK::Press(MousePress::Middle) => match tab_bar_item {
+                 TabBarItem::Tab { tab_idx, .. } => {
+                     self.close_specific_tab(tab_idx, true);
+                 }
+@@ -522,7 +559,7 @@ impl super::TermWindow {
+                 | TabBarItem::RightStatus
+                 | TabBarItem::WindowButton(_) => {}
+             },
+-            WMEK::Press(MousePress::Right) => match item {
++            WMEK::Press(MousePress::Right) => match tab_bar_item {
+                 TabBarItem::Tab { .. } => {
+                     self.show_tab_navigator();
+                 }
+@@ -534,7 +571,7 @@ impl super::TermWindow {
+                 | TabBarItem::RightStatus
+                 | TabBarItem::WindowButton(_) => {}
+             },
+-            WMEK::Move => match item {
++            WMEK::Move => match tab_bar_item {
+                 TabBarItem::None | TabBarItem::LeftStatus | TabBarItem::RightStatus => {
+                     context.set_window_drag_position(event.screen_coords);
+                 }
+diff --git a/wezterm-gui/src/termwindow/render/fancy_tab_bar.rs b/wezterm-gui/src/termwindow/render/fancy_tab_bar.rs
+index 2474e2d..469385c 100644
+--- a/wezterm-gui/src/termwindow/render/fancy_tab_bar.rs
++++ b/wezterm-gui/src/termwindow/render/fancy_tab_bar.rs
+@@ -528,13 +528,71 @@ impl crate::TermWindow {
+         let computed = self.fancy_tab_bar.as_ref().ok_or_else(|| {
+             anyhow::anyhow!("paint_fancy_tab_bar called but fancy_tab_bar is None")
+         })?;
++        // Hit-testing and future layout must be based on the real,
++        // un-dragged positions, so this is computed before any
++        // drag-preview translation below.
+         let ui_items = computed.ui_items();
+ 
+         let gl_state = self.render_state.as_ref().unwrap();
+-        self.render_element(&computed, gl_state, None)?;
++
++        if let Some(floating) = self.dragged_tab_preview(computed) {
++            self.render_element(&floating, gl_state, None)?;
++        } else {
++            self.render_element(&computed, gl_state, None)?;
++        }
+ 
+         Ok(ui_items)
+     }
++
++    /// If a tab is currently being dragged, returns a copy of the tab bar
++    /// with just that tab's element translated so that it visually follows
++    /// the mouse cursor, rendered above its neighbors. Without this, moving
++    /// a tab past its neighbor is invisible until something else happens to
++    /// repaint the window.
++    fn dragged_tab_preview(&self, computed: &ComputedElement) -> Option<ComputedElement> {
++        let (drag_item, drag_event) = self.dragging.as_ref()?;
++        let tab_idx = match &drag_item.item_type {
++            UIItemType::TabBar(TabBarItem::Tab { tab_idx, .. }) => *tab_idx,
++            _ => return None,
++        };
++        let offset = self.dragging_tab_start_offset?;
++        let target_x = (drag_event.coords.x - offset).max(0) as f32;
++
++        let mut floating = computed.clone();
++        if translate_dragged_tab(&mut floating, tab_idx, target_x) {
++            Some(floating)
++        } else {
++            None
++        }
++    }
++}
++
++/// Recursively finds the tab bar element for `target_tab_idx` and shifts it
++/// so its left edge sits at `target_x`, drawing it above its siblings.
++fn translate_dragged_tab(
++    computed: &mut ComputedElement,
++    target_tab_idx: usize,
++    target_x: f32,
++) -> bool {
++    let is_target = matches!(
++        &computed.item_type,
++        Some(UIItemType::TabBar(TabBarItem::Tab { tab_idx, .. })) if *tab_idx == target_tab_idx
++    );
++    if is_target {
++        let delta_x = target_x - computed.bounds.min_x();
++        computed.translate(euclid::Vector2D::new(delta_x, 0.0));
++        computed.zindex = i8::MAX;
++        return true;
++    }
++
++    if let ComputedElementContent::Children(kids) = &mut computed.content {
++        for kid in kids {
++            if translate_dragged_tab(kid, target_tab_idx, target_x) {
++                return true;
++            }
++        }
++    }
++    false
+ }
+ 
+ fn make_x_button(
+diff --git a/wezterm-gui/src/termwindow/tab_drag.rs b/wezterm-gui/src/termwindow/tab_drag.rs
+new file mode 100644
+index 0000000..5f22e8c
+--- /dev/null
++++ b/wezterm-gui/src/termwindow/tab_drag.rs
+@@ -0,0 +1,54 @@
++/// Cross neighboring tab midpoints, including several in a single fast move.
++pub(crate) fn tab_drag_target(
++    current: usize,
++    pointer_x: isize,
++    bounds: impl IntoIterator<Item = (usize, usize, usize)>,
++) -> usize {
++    let mut target = current;
++    for (index, left, width) in bounds {
++        let midpoint = left.saturating_add(width / 2) as isize;
++        if index < current && pointer_x < midpoint {
++            target = target.min(index);
++        } else if index > current && pointer_x > midpoint {
++            target = target.max(index);
++        }
++    }
++    target
++}
++
++#[cfg(test)]
++mod tests {
++    use super::tab_drag_target;
++
++    const TABS: [(usize, usize, usize); 4] =
++        [(0, 100, 100), (1, 200, 100), (2, 300, 100), (3, 400, 100)];
++
++    #[test]
++    fn crosses_midpoints_in_both_directions() {
++        assert_eq!(tab_drag_target(1, 220, TABS), 1);
++        assert_eq!(tab_drag_target(1, 350, TABS), 1);
++        assert_eq!(tab_drag_target(1, 351, TABS), 2);
++        assert_eq!(tab_drag_target(2, 250, TABS), 2);
++        assert_eq!(tab_drag_target(2, 249, TABS), 1);
++    }
++
++    #[test]
++    fn handles_fast_moves_and_clamps_at_the_ends() {
++        assert_eq!(tab_drag_target(0, 900, TABS), 3);
++        assert_eq!(tab_drag_target(3, -50, TABS), 0);
++        assert_eq!(tab_drag_target(0, -50, TABS), 0);
++        assert_eq!(tab_drag_target(3, 900, TABS), 3);
++        assert_eq!(tab_drag_target(0, 300, [(0, 100, 100)]), 0);
++        assert_eq!(tab_drag_target(0, 300, []), 0);
++    }
++
++    #[test]
++    fn uses_actual_widths_and_supports_reversing_a_drag() {
++        let tabs = [(0, 100, 80), (1, 180, 220), (2, 400, 100)];
++        assert_eq!(tab_drag_target(0, 289, tabs), 0);
++        assert_eq!(tab_drag_target(0, 291, tabs), 1);
++        assert_eq!(tab_drag_target(2, 139, tabs), 0);
++        assert_eq!(tab_drag_target(3, 220, TABS), 1);
++        assert_eq!(tab_drag_target(1, 451, TABS), 3);
++    }
++}
+diff --git a/window/src/os/macos/window.rs b/window/src/os/macos/window.rs
+index 1193d39..7fe61d0 100644
+--- a/window/src/os/macos/window.rs
++++ b/window/src/os/macos/window.rs
+@@ -2429,6 +2429,11 @@ impl WindowView {
+     extern "C" fn mouse_down(this: &mut Object, _sel: Sel, nsevent: id) {
+         Self::mouse_common(this, nsevent, MouseEventKind::Press(MousePress::Left));
+     }
++
++    extern "C" fn mouse_down_can_move_window(_: &mut Object, _: Sel) -> BOOL {
++        // The tab bar handles its own drags, even when the view is transparent.
++        NO
++    }
+     extern "C" fn right_mouse_up(this: &mut Object, _sel: Sel, nsevent: id) {
+         Self::mouse_common(this, nsevent, MouseEventKind::Release(MousePress::Right));
+     }
+@@ -3268,6 +3273,11 @@ impl WindowView {
+                 WindowView::dealloc as extern "C" fn(&mut Object, Sel),
+             );
+ 
++            cls.add_method(
++                sel!(mouseDownCanMoveWindow),
++                Self::mouse_down_can_move_window as extern "C" fn(&mut Object, Sel) -> BOOL,
++            );
++
+             cls.add_method(
+                 sel!(weztermPerformKeyAssignment:),
+                 Self::wezterm_perform_key_assignment

@@ -5,14 +5,16 @@ A [WezTerm](https://wezterm.org) setup for macOS that looks and behaves like
 environment, folder and git branch, a command line you edit like a text
 editor, and tabs that tell you when something needs you.
 
-It is two files. `wezterm.lua` is the look and the keyboard shortcuts.
+`wezterm.lua` is the look and the keyboard shortcuts.
 `shell.zsh` is the zsh side: the prompt and the editing. It is only loaded
 inside WezTerm, so every other terminal stays exactly as it was.
+`build-wezterm.sh` builds the custom WezTerm app that adds mouse tab dragging.
 
 ## Set it up on a Mac
 
 By hand, in any terminal you already have. No agent, no account, nothing to
-answer. You need [Homebrew](https://brew.sh) first; then two lines:
+answer. You need [Homebrew](https://brew.sh) and Apple's Command Line Tools
+(`xcode-select --install`) first; then two lines:
 
 ```sh
 git clone https://github.com/jzhu32/wezterm_warpstyle.git ~/Developer/Tools/WezTerm
@@ -20,19 +22,21 @@ git clone https://github.com/jzhu32/wezterm_warpstyle.git ~/Developer/Tools/WezT
 ```
 
 Quit WezTerm and open it again. That is all.
+The first run compiles WezTerm for this Mac's processor, which can take several
+minutes and several GB of disk space. Later runs reuse the build.
 
 If the folder is already there, you are updating rather than installing:
 
 ```sh
-cd ~/Developer/Tools/WezTerm && git pull && ./install.sh
+cd ~/Developer/Tools/WezTerm && git pull --ff-only && ./install.sh
 ```
 
 A few things worth knowing:
 
-- The installer is safe to run again at any time, and only adds what is
-  missing.
-- `./install.sh --no-brew` skips Homebrew, for when WezTerm and the tools are
-  already installed and you only want the config.
+- The installer is safe to run again. It adds missing dependencies and installs
+  the custom app when its source or patch changes.
+- `./install.sh --no-brew` only links the config; it skips dependencies and the
+  custom app build.
 - An open WezTerm picks up `wezterm.lua` the moment it changes. `shell.zsh`
   applies to new tabs; a tab you already have takes it after
   `source ~/.config/wezterm/shell.zsh`.
@@ -44,9 +48,11 @@ that in [Ask an agent instead](#ask-an-agent-instead).
 
 ### What the installer does
 
-1. Installs what is missing with Homebrew: WezTerm, the Hack Nerd Font,
-   `zsh-autosuggestions`, `zsh-syntax-highlighting`, `fzf` and `zoxide`.
-   Nothing you already have is upgraded.
+1. Installs missing build tools, the Hack Nerd Font, `zsh-autosuggestions`,
+   `zsh-syntax-highlighting`, `fzf` and `zoxide` with Homebrew. Builds and checks
+   the pinned custom WezTerm, saves the previous app under `.build/backup.*`,
+   and replaces `/Applications/WezTerm.app`. Existing Homebrew WezTerm casks
+   are removed after the custom app has built successfully.
 2. Links `wezterm.lua` and `shell.zsh` into `~/.config/wezterm`. Files that
    were already there are kept with `.before-warpstyle` added to their names.
 3. Adds one line to `~/.zshrc` that loads `shell.zsh` inside WezTerm. Your
@@ -67,8 +73,9 @@ Two things are optional. Without them the feature that uses them does nothing:
 The config files in `~/.config/wezterm` are links into this folder, so this
 folder is the one place to change things.
 
-- **Get the latest on a Mac:** `git pull` in this folder. An open WezTerm
-  picks up `wezterm.lua` straight away; `shell.zsh` applies to new tabs.
+- **Get the latest on a Mac:** `git pull --ff-only && ./install.sh` in this
+  folder, then quit and reopen WezTerm. This updates both the config and the
+  custom app. Apple Silicon and Intel Macs each build for their own processor.
 - **Send a change from a Mac:** `git add -A && git commit -m "what changed" && git push`.
 
 ## Ask an agent instead
@@ -102,6 +109,24 @@ The repo is https://github.com/jzhu32/wezterm_warpstyle.git and it belongs at
 This saves no work over the two lines above; it is only here for when you
 would rather not type them. The agent is doing the same `git pull` and
 `./install.sh`, so read its plan before you let it go.
+
+### Why there is a custom app
+
+Official WezTerm builds do not yet support dragging tabs to reorder them.
+The build uses official upstream commit
+[`e68a8ec2`](https://github.com/wezterm/wezterm/commit/e68a8ec27727fbbda15e07f0a0737cd5e16481f6)
+with the changes in `patches/tab-drag.patch`. The patch builds on
+[Jefffrey's tab dragging](https://github.com/wezterm/wezterm/pull/6527) and
+[Jay Johnston's drag preview](https://github.com/wezterm/wezterm/pull/7926),
+with fixes for fast moves, cancelling a drag when the window loses focus, and
+macOS passing tab drags through to the window. The rest of the app stays at
+that pinned upstream version.
+
+The app is built and signed locally, without an Apple notarization certificate.
+Source, compiled files and app backups stay in the ignored `.build/` folder;
+GitHub contains the patch and build instructions. Avoid installing a Homebrew
+WezTerm cask over this app: rerun `./install.sh` to restore the custom build.
+`./build-wezterm.sh` builds and validates the app without installing it.
 
 ## What you get
 
@@ -148,6 +173,7 @@ changed size in the meantime.
 | Cmd+Shift+[ / ], or Ctrl+Tab | The tab before or after this one. |
 | Cmd+Shift+R, or Cmd+P and "Rename tab" | Name the tab yourself. An empty name goes back to the automatic one. |
 | Ctrl+Shift+Left / Right | Move the tab. |
+| Drag a tab left or right with the mouse | Reorder tabs in the same window. Grab the tab's label, away from its close button. |
 | Cmd+D, Cmd+Shift+D | Split to the right, split downwards. |
 | Cmd+Option+4 | Turn the pane you are in into a grid of four. |
 | Cmd+Option+arrows | Move between splits. Cmd+Ctrl+arrows resizes them. |
@@ -259,13 +285,21 @@ window change.
 1. Delete the line near the end of `~/.zshrc` that mentions `wezterm/shell.zsh`.
 2. Delete `~/.config/wezterm` and `~/.cache/wezterm-warp`.
 3. Optionally remove `"preferredNotifChannel"` from `~/.claude/settings.json`,
-   and uninstall the Homebrew packages listed in `Brewfile`.
+   delete the custom `/Applications/WezTerm.app`, and uninstall the Homebrew
+   packages listed in `Brewfile`. To return to the official app, run
+   `brew install --cask wezterm@nightly` after removing the custom app.
 
 ## Checking a change
 
 ```sh
 python3 tests/run.py
 ```
+
+`./build-wezterm.sh` also runs the native drag boundary tests, checks the app's
+signature and configuration, and rejects binaries linked to Homebrew libraries.
+After installing a changed native patch, manually check dragging in both
+directions, a fast move across several tabs, switching tabs, the close and `+`
+buttons, and dragging the empty part of the bar to move the window.
 
 This drives a real zsh through every editing feature, runs the logic in
 `wezterm.lua` against a stand-in for WezTerm, and starts WezTerm's own engine

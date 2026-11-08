@@ -1,6 +1,10 @@
 # What the setup needs. `./install.sh` installs whatever is missing.
 
-cask "wezterm"
+# The custom WezTerm is built by build-wezterm.sh; do not install a competing cask.
+brew "rust"
+brew "cmake"
+brew "pkgconf"
+brew "openssl@3"                  # statically linked into the custom app
 cask "font-hack-nerd-font"         # Warp's font, with the icons used in the prompt and tabs
 
 brew "zsh-autosuggestions"         # grey suggestions from your history as you type
