@@ -293,22 +293,23 @@ local function tab_items(index, active, p, count, max_width, columns)
     all, { { left = 0, width = columns or 116 } }, nil, nil, max_width or 48)
 end
 local function tab(index, active, p, count)
-  return flatten(tab_items(index, active, p, count))
+  return (flatten(tab_items(index, active, p, count)):gsub("\u{f0633}", "⌘"))
 end
-local function squeeze(text) return (text:gsub("  +", "  ")) end
+-- Content expectations ignore alignment padding; spacing is checked separately.
+local function squeeze(text) return (text:gsub("  +", "  "):gsub(" +$", " ")) end
 local url = newproxy(true); getmetatable(url).__index = { file_path = fake_home .. "/Developer/Swift/Meldrun" }
 local root = newproxy(true); getmetatable(root).__index = { file_path = fake_home }
 local shell_tab = { current_working_dir = url, foreground_process_name = "/bin/zsh", title = "~/Developer/Swift/Meldrun", user_vars = { WEZ_ZLE = "1", WEZ_BRANCH = "main" } }
 local home_tab = { current_working_dir = root, foreground_process_name = "/bin/zsh", title = "~", user_vars = { WEZ_ZLE = "1", WEZ_BRANCH = "" } }
 local claude_tab = { current_working_dir = root, foreground_process_name = CLAUDE, title = "✳ Fix the login bug", user_vars = { WEZ_ZLE = "0", WEZ_CMD = "claude" } }
 
-check("tab: at the prompt shows folder, branch and shortcut", squeeze(tab(0, true, shell_tab)), "  \u{f413} Swift/Meldrun  \u{f418} main  ⌘1 ")
-check("tab: home folder shows ~", squeeze(tab(1, false, home_tab)), "  \u{f413} ~  ⌘2 ")
-check("tab: a running program shows its own title", squeeze(tab(0, true, claude_tab)), "  \u{ec82} Fix the login bug  ⌘1 ")
+check("tab: at the prompt shows folder, branch and shortcut", squeeze(tab(0, true, shell_tab)), "  \u{f413} Swift/Meldrun  \u{f418} main  ⌘ 1 ")
+check("tab: home folder shows ~", squeeze(tab(1, false, home_tab)), "  \u{f413} ~  ⌘ 2 ")
+check("tab: a running program shows its own title", squeeze(tab(0, true, claude_tab)), "  \u{ec82} Fix the login bug  ⌘ 1 ")
 check("tab: Claude Code without a title is not shown as a version number",
-  squeeze(tab(0, true, { current_working_dir = root, foreground_process_name = CLAUDE, title = "2.1.296", user_vars = {} })), "  \u{ec82} claude  ⌘1 ")
+  squeeze(tab(0, true, { current_working_dir = root, foreground_process_name = CLAUDE, title = "2.1.296", user_vars = {} })), "  \u{ec82} claude  ⌘ 1 ")
 check("tab: Codex gets its own mark even when the foreground process is Node",
-  squeeze(tab(0, true, { current_working_dir = root, foreground_process_name = "/opt/homebrew/bin/node", title = "Build the settings view", user_vars = { WEZ_ZLE = "0", WEZ_CMD = "codex" } })), "  \u{ec81} Build the settings view  ⌘1 ")
+  squeeze(tab(0, true, { current_working_dir = root, foreground_process_name = "/opt/homebrew/bin/node", title = "Build the settings view", user_vars = { WEZ_ZLE = "0", WEZ_CMD = "codex" } })), "  \u{ec81} Build the settings view  ⌘ 1 ")
 local cli_cases = {
   { "gemini", "\u{100001}", "Gemini CLI" }, { "qwen", "\u{100002}", "Qwen Code" },
   { "muse", "\u{100003}", "Muse Code" }, { "dsh", "\u{100004}", "DeepSeek" },
@@ -321,64 +322,83 @@ for _, case in ipairs(cli_cases) do
   local p = { foreground_process_name = "/opt/homebrew/bin/node", title = "node", user_vars = { WEZ_ZLE = "0", WEZ_CMD = cmd } }
   cli_panes[#cli_panes + 1] = p
   check("tab: " .. cmd .. " is recognized behind Node and gets a readable default name",
-    squeeze(tab(0, true, p)), "  " .. icon .. " " .. label .. "  ⌘1 ")
+    squeeze(tab(0, true, p)), "  " .. icon .. " " .. label .. "  ⌘ 1 ")
   check("tab: a directly launched " .. cmd .. " keeps its changing task title",
     squeeze(tab(0, true, { foreground_process_name = "/opt/bin/" .. cmd, title = "Fix the tests", user_vars = {} })),
-    "  " .. icon .. " Fix the tests  ⌘1 ")
+    "  " .. icon .. " Fix the tests  ⌘ 1 ")
   p.tab_title = "My review"
-  check("tab: renaming " .. cmd .. " keeps its mark", squeeze(tab(0, true, p)), "  " .. icon .. " My review  ⌘1 ")
+  check("tab: renaming " .. cmd .. " keeps its mark", squeeze(tab(0, true, p)), "  " .. icon .. " My review  ⌘ 1 ")
   p.tab_title = nil
   check("tab: a crowded " .. cmd .. " tab keeps its mark", flatten(tab_items(0, true, p, 2, 7)):find(icon, 1, true) ~= nil, true)
 end
 check("tab: an npx package name is recognized after the shell unwraps it",
   squeeze(tab(0, true, { foreground_process_name = "/bin/node", title = "node", user_vars = { WEZ_ZLE = "0", WEZ_CMD = "gemini-cli" } })),
-  "  \u{100001} Gemini CLI  ⌘1 ")
+  "  \u{100001} Gemini CLI  ⌘ 1 ")
 check("tab: a CLI name appearing in ordinary arguments is not treated as the running app",
   flatten(tab_items(0, true, { foreground_process_name = "/bin/node", title = "node gemini", user_vars = { WEZ_ZLE = "0", WEZ_CMD = "node" } })):find("\u{100001}", 1, true), nil)
 check("tab: returning to the prompt clears a new CLI's stale mark",
   squeeze(tab(0, true, { current_working_dir = root, foreground_process_name = "/bin/zsh", title = "~", user_vars = { WEZ_ZLE = "1", WEZ_CMD = "gemini" } })),
-  "  \u{f413} ~  ⌘1 ")
+  "  \u{f413} ~  ⌘ 1 ")
 check("tab: a name you set keeps the agent mark",
-  squeeze(tab(0, true, { tab_title = "Backend review", foreground_process_name = CLAUDE, title = "✳ ignored", user_vars = {} })), "  \u{ec82} Backend review  ⌘1 ")
+  squeeze(tab(0, true, { tab_title = "Backend review", foreground_process_name = CLAUDE, title = "✳ ignored", user_vars = {} })), "  \u{ec82} Backend review  ⌘ 1 ")
 check("tab: a non-Latin Claude title keeps its first character",
-  squeeze(tab(0, true, { foreground_process_name = CLAUDE, title = "修复登录", user_vars = { WEZ_ZLE = "0" } })), "  \u{ec82} 修复登录  ⌘1 ")
+  squeeze(tab(0, true, { foreground_process_name = CLAUDE, title = "修复登录", user_vars = { WEZ_ZLE = "0" } })), "  \u{ec82} 修复登录  ⌘ 1 ")
 check("tab: returning to the shell removes a stale agent logo",
-  squeeze(tab(0, true, { tab_title = "Review", foreground_process_name = "/bin/zsh", title = "~", user_vars = { WEZ_ZLE = "1", WEZ_CMD = "claude" } })), "  Review  ⌘1 ")
+  squeeze(tab(0, true, { tab_title = "Review", foreground_process_name = "/bin/zsh", title = "~", user_vars = { WEZ_ZLE = "1", WEZ_CMD = "claude" } })), "  Review  ⌘ 1 ")
 check("tab: versioned Python gets its real language icon",
-  squeeze(tab(0, true, { foreground_process_name = "/opt/homebrew/bin/python3.14", title = "python analysis.py", user_vars = { WEZ_ZLE = "0" } })), "  \u{e73c} python analysis.py  ⌘1 ")
+  squeeze(tab(0, true, { foreground_process_name = "/opt/homebrew/bin/python3.14", title = "python analysis.py", user_vars = { WEZ_ZLE = "0" } })), "  \u{e73c} python analysis.py  ⌘ 1 ")
 check("tab: a plain program gets a terminal icon",
-  squeeze(tab(0, true, { current_working_dir = root, foreground_process_name = "/opt/homebrew/bin/npm", title = "npm run dev", user_vars = { WEZ_ZLE = "0" } })), "  \u{e71e} npm run dev  ⌘1 ")
+  squeeze(tab(0, true, { current_working_dir = root, foreground_process_name = "/opt/homebrew/bin/npm", title = "npm run dev", user_vars = { WEZ_ZLE = "0" } })), "  \u{e71e} npm run dev  ⌘ 1 ")
 check("tab: a shell started before this setup still shows its folder",
-  squeeze(tab(2, true, { current_working_dir = url, foreground_process_name = "/bin/zsh", title = "zsh", user_vars = {} })), "  \u{f413} Swift/Meldrun  ⌘3 ")
-check("tab: a name you set wins", squeeze(tab(0, true, { tab_title = "mine", foreground_process_name = "/bin/zsh", title = "zsh", user_vars = {} })), "  mine  ⌘1 ")
+  squeeze(tab(2, true, { current_working_dir = url, foreground_process_name = "/bin/zsh", title = "zsh", user_vars = {} })), "  \u{f413} Swift/Meldrun  ⌘ 3 ")
+check("tab: a name you set wins", squeeze(tab(0, true, { tab_title = "mine", foreground_process_name = "/bin/zsh", title = "zsh", user_vars = {} })), "  mine  ⌘ 1 ")
 
 local widths = {}
 for _, p in ipairs({ shell_tab, home_tab, claude_tab }) do widths[#widths + 1] = #chars(tab(0, false, p)) end
 check("tabs: all the same width, whatever they say", table.concat(widths, " "), "36 36 36")
-check("  ...with the shortcut at the right edge", tab(1, false, home_tab):sub(-5), "⌘2 ")
+check("  ...with a clear gap between the shortcut and X", tab(1, false, home_tab):sub(-9), "⌘ 2    ")
 check("  ...sharing the bar when there are many", #chars(tab(0, false, shell_tab, 5)), 16)
 check("  ...and never wider than the limit", #chars(tab(0, true, shell_tab, 1)), 40)
+local shortcut_clearance = true
+local shortcut_glyph = true
+local shortcut_alignment = true
+local long_shortcut_tab = { tab_title = string.rep("A very long tab title ", 10), foreground_process_name = "/bin/codex", user_vars = { WEZ_ZLE = "0" } }
+for _, active in ipairs({ true, false }) do
+  for width = 16, 48 do
+    for _, p in ipairs({ shell_tab, long_shortcut_tab }) do
+      local text = flatten(tab_items(0, active, p, 2, width))
+      shortcut_clearance = shortcut_clearance and text:match("1( +)$") == "    " and #chars(text) <= math.min(width, 36)
+      shortcut_glyph = shortcut_glyph and text:find("\u{f0633} 1", 1, true) ~= nil
+      local start = text:find("\u{f0633} 1", 1, true)
+      shortcut_alignment = shortcut_alignment and start ~= nil
+        and #chars(text:sub(1, start - 1)) == math.min(width, 36) - 7
+    end
+  end
+end
+check("tab shortcuts reserve four cells before the native close button", shortcut_clearance, true)
+check("tab shortcuts use the Command mark from the same Nerd Font as their digits", shortcut_glyph, true)
+check("tab shortcuts align in one column for short and long active or inactive titles", shortcut_alignment, true)
 local crowded = tab(0, false, shell_tab, 9)
 check("  ...a crowded bar drops the shortcut and branch but keeps the folder", crowded:find("⌘") == nil and crowded:find("un") ~= nil and #chars(crowded) <= 8, true)
 local long = newproxy(true); getmetatable(long).__index = { file_path = fake_home .. "/Developer/a-very-long-folder-name/and-another-long-one/project" }
 local long_tab = { current_working_dir = long, foreground_process_name = "/bin/zsh", title = "", user_vars = { WEZ_ZLE = "1", WEZ_BRANCH = "feat/architecture-completion-20261010" } }
-check("tab: a long path shows its last two folders", squeeze(tab(0, true, long_tab, 1)), "  \u{f413} and-another-long-one/project  ⌘1 ")
+check("tab: a long path preserves its final folder", squeeze(tab(0, true, long_tab, 1)), "  \u{f413} …d-another-long-one/project  ⌘ 1 ")
 local shown = tab(0, true, long_tab, 5)
-check("  ...and is cut from the left when the tab is narrow", #chars(shown) == 16 and shown:find("…[^ ]*ject") ~= nil, true)
+check("  ...and is cut from the left when the tab is narrow", #chars(shown) == 16 and shown:find("…[^ ]*ct") ~= nil, true)
 check("tab: a long branch takes only the room that is left",
   squeeze(tab(0, true, { current_working_dir = url, foreground_process_name = "/bin/zsh", title = "", user_vars = { WEZ_ZLE = "1", WEZ_BRANCH = "feat/architecture-completion-20261010" } }, 1)),
-  "  \u{f413} Swift/Meldrun  \u{f418} feat/architec…  ⌘1 ")
+  "  \u{f413} Swift/Meldrun  \u{f418} feat/arch…  ⌘ 1 ")
 check("tab: folders near the top of the disk are shown whole",
   squeeze(tab(0, false, { current_working_dir = dir_at and dir_at("/usr/local") or (function() local u = newproxy(true); getmetatable(u).__index = { file_path = "/usr/local" }; return u end)(), foreground_process_name = "/bin/zsh", title = "", user_vars = { WEZ_ZLE = "1" } })),
-  "  \u{f413} /usr/local  ⌘1 ")
-check("tab: cmd+9 labels the last tab even with ten tabs", flatten(tab_items(9, true, home_tab, 10, 48, 500)):find("⌘9", 1, true) ~= nil, true)
-check("tab: the ninth tab does not claim cmd+9 when another follows", flatten(tab_items(8, true, home_tab, 10, 48, 500)):find("⌘9", 1, true), nil)
+  "  \u{f413} /usr/local  ⌘ 1 ")
+check("tab: cmd+9 labels the last tab even with ten tabs", flatten(tab_items(9, true, home_tab, 10, 48, 500)):find("\u{f0633} 9", 1, true) ~= nil, true)
+check("tab: the ninth tab does not claim cmd+9 when another follows", flatten(tab_items(8, true, home_tab, 10, 48, 500)):find("\u{f0633} 9", 1, true), nil)
 local fits = true
-for width = 0, 8 do
+for width = 0, 15 do
   local items = tab_items(0, true, { tab_title = "a very long name", user_vars = {} }, 2, width)
   fits = fits and #chars(flatten(items)) <= width
 end
-check("tab titles fit even when the bar allows only zero to eight cells", fits, true)
+check("tab titles fit even when the bar allows only zero to fifteen cells", fits, true)
 check("a very narrow agent tab keeps its identifying mark",
   flatten(tab_items(0, true, claude_tab, 2, 7)):find("\u{ec82}", 1, true) ~= nil, true)
 
@@ -390,26 +410,34 @@ local function colors_of(items)
   end
   return table.concat(found, " ")
 end
-check("the tab in front is colored: icon, branch, shortcut", colors_of(tab_items(0, true, shell_tab)), "#19AAD8 #D6FCB9 #A9A9A9")
-check("ordinary inactive tabs are left plain", colors_of(tab_items(0, false, shell_tab)), "")
-check("inactive Claude tabs keep their identifying color", colors_of(tab_items(0, false, claude_tab)), "#E3997A")
+local function color_of_text(items, text)
+  local foreground
+  for _, item in ipairs(items) do
+    if item == "ResetAttributes" then foreground = nil
+    elseif item.Foreground then foreground = item.Foreground.Color
+    elseif item.Text and item.Text:find(text, 1, true) then return foreground end
+  end
+end
+check("the tab in front is colored: icon, branch, shortcut", colors_of(tab_items(0, true, shell_tab)), "#19AAD8 #D6FCB9 #FFFFFF")
+check("inactive tab shortcuts stay bright beside the close button", colors_of(tab_items(0, false, shell_tab)), "#FFFFFF")
+check("inactive Claude tabs keep their identifying color", colors_of(tab_items(0, false, claude_tab)), "#E3997A #FFFFFF")
 check("Codex uses a neutral OpenAI logo",
-  colors_of(tab_items(0, false, { foreground_process_name = "/opt/homebrew/bin/codex", title = "Codex", user_vars = { WEZ_ZLE = "0" } })), "#FFFFFF")
+  colors_of(tab_items(0, false, { foreground_process_name = "/opt/homebrew/bin/codex", title = "Codex", user_vars = { WEZ_ZLE = "0" } })), "#FFFFFF #FFFFFF")
 local light_config, light_events = load_config("Light")
 local light_agent = light_events["format-tab-title"](
   { tab_title = "", tab_index = 0, is_active = false, active_pane = claude_tab },
   { {} }, { { left = 0, width = 116 } }, nil, nil, 48)
-check("the Claude mark remains distinct in the light theme", colors_of(light_agent), "#A8472D")
+check("the Claude mark remains distinct in the light theme", colors_of(light_agent), "#A8472D #111111")
 local codex_tab = { tab_title = "", tab_index = 0, is_active = true,
   active_pane = { foreground_process_name = "/opt/homebrew/bin/codex", title = "Codex", user_vars = { WEZ_ZLE = "0" } } }
 local dark_window_from_light_lua = light_events["format-tab-title"](
   codex_tab, { codex_tab }, { { left = 0, width = 116 } }, { color_scheme = "Warp Dark" }, false, 48)
 check("a dark window keeps a white logo even after another Lua context loads light mode",
-  colors_of(dark_window_from_light_lua):find("#FFFFFF", 1, true) ~= nil, true)
+  color_of_text(dark_window_from_light_lua, "\u{ec81}"), "#FFFFFF")
 local light_window_from_dark_lua = title(
   codex_tab, { codex_tab }, { { left = 0, width = 116 } }, { color_scheme = "Warp Light" }, false, 48)
 check("a light window keeps a dark logo after a dark-mode Lua reload",
-  colors_of(light_window_from_dark_lua):find("#111111", 1, true) ~= nil, true)
+  color_of_text(light_window_from_dark_lua, "\u{ec81}"), "#111111")
 light_events["update-status"](window("", "select_all"))
 check("selection hints also follow a dark window after a light-mode reload", colors_of(formatted), "#19AAD8")
 events["update-status"](window("", "select_all", { color_scheme = "Warp Light" }))
@@ -503,10 +531,10 @@ events["bell"](w, claude_pane)
 check("bell from a tab you are not on marks it", GLOBAL.attention_7, true)
 check("  ...and raises a notification naming it", w.toasts[1], "✳ Fix the login bug needs you")
 local flagged = { pane_id = 7, foreground_process_name = CLAUDE, title = "✳ Fix the login bug", user_vars = { WEZ_ZLE = "0" } }
-check("  ...and its tab gets a dot", squeeze(tab(1, false, flagged)), "  ● \u{ec82} Fix the login bug  ⌘2 ")
-check("  ...colors only the attention dot and agent mark", colors_of(tab_items(1, false, flagged)), "#FFB000 #E3997A")
+check("  ...and its tab gets a dot", squeeze(tab(1, false, flagged)), "  ● \u{ec82} Fix the login bug  ⌘ 2 ")
+check("  ...keeps the attention dot, agent mark and shortcut distinct", colors_of(tab_items(1, false, flagged)), "#FFB000 #E3997A #FFFFFF")
 check("  ...with items WezTerm knows", badly_shaped(tab_items(1, false, flagged)), "")
-check("  ...but not while it is the tab in front", squeeze(tab(1, true, flagged)), "  \u{ec82} Fix the login bug  ⌘2 ")
+check("  ...but not while it is the tab in front", squeeze(tab(1, true, flagged)), "  \u{ec82} Fix the login bug  ⌘ 2 ")
 w = window("", nil, { active = claude_pane })
 events["update-status"](w)
 check("looking at the tab clears the dot", GLOBAL.attention_7, false)

@@ -204,9 +204,11 @@ changed size in the meantime.
 | Cmd+W, or Cmd+P and "Close this split" | Close the split you are in. Closing the last split closes the tab. Splits have no close button of their own: WezTerm draws none, and the config cannot add one. |
 
 Tabs share the bar evenly. Each shows its last two folders and git branch
-while the shell is waiting, or the running program's own title. Claude and
-Codex tabs show their real logos from Nerd Fonts 3.5.1: Claude in warm orange,
-Codex with the OpenAI mark in white on dark themes and near-black on light.
+while the shell is waiting, or the running program's own title. Shortcut hints
+use matching font metrics and keep clear of the close button; titles and
+branches shorten first. Claude and Codex tabs show their real logos from Nerd
+Fonts 3.5.1: Claude in warm orange, Codex with the OpenAI mark in white on dark
+themes and near-black on light.
 The other CLI logos come from the small [bundled font](fonts/README.md).
 Tab accents follow each window's palette even after a config reload. Native
 tab controls, shortcuts, shell suggestions and welcome text also adapt to the

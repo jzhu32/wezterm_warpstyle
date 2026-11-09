@@ -359,7 +359,10 @@ wezterm.on("format-tab-title", function(tab, tabs, panes, effective_config, _, m
   local width = math.max(0, math.min(tab_width(tabs and #tabs or 1, panes), max_width))
   local number = tab.tab_index < 8 and tab.tab_index + 1
     or (tabs and tab.tab_index == #tabs - 1 and 9)
-  local shortcut = (number and width >= 16) and ("⌘" .. number) or ""
+  -- Use the tab font's Command mark, with room for its ink overhang.
+  local shortcut = (number and width >= 16) and ("\u{f0633} " .. number) or ""
+  -- The native X floats over the line; leave its full hit area clear.
+  local right_padding = "    "
 
   local needs_you = false
   if not tab.is_active then
@@ -369,17 +372,18 @@ wezterm.on("format-tab-title", function(tab, tabs, panes, effective_config, _, m
   end
   local dot = needs_you and "● " or ""
 
-  -- 2 before the name, 1 after the shortcut, 2 between them at the least.
-  local room = width - 3 - wezterm.column_width(dot) - (shortcut ~= "" and wezterm.column_width(shortcut) + 2 or 0)
-  local icon, label, branch, agent = tab_label(tab.tab_title, pane, math.max(room, 4))
+  -- Reserve the shortcut and close area before shortening the title or branch.
+  local room = width - 2 - #right_padding - wezterm.column_width(dot) - (shortcut ~= "" and wezterm.column_width(shortcut) + 2 or 0)
+  local label_room = width < 12 and width or room
+  local icon, label, branch, agent = tab_label(tab.tab_title, pane, math.max(label_room, 4))
   -- At very small widths, make room for the name before decoration.
-  if width < 8 then
+  if width < 12 then
     local compact_icon = agent and icon ~= "" and (icon .. " ") or ""
     return { { Text = width > 0 and keep_start(dot .. compact_icon .. label, width) or "" } }
   end
   icon = icon ~= "" and (icon .. " ") or ""
   branch = branch and ("  \u{f418} " .. branch) or ""
-  local used = 2 + wezterm.column_width(dot .. icon .. label .. branch) + wezterm.column_width(shortcut) + 1
+  local used = 2 + wezterm.column_width(dot .. icon .. label .. branch) + wezterm.column_width(shortcut) + #right_padding
   local gap = string.rep(" ", math.max(width - used, shortcut ~= "" and 2 or 0))
 
   local function colored(color, text)
@@ -403,17 +407,19 @@ wezterm.on("format-tab-title", function(tab, tabs, panes, effective_config, _, m
     add(items, colored(agent_color or tab_theme.cursor or tab_theme.accent, icon))
     add(items, { Attribute = { Intensity = "Bold" } }, { Text = label }, "ResetAttributes")
     add(items, colored(tab_theme.branch, branch))
-    add(items, { Text = gap })
-    add(items, colored(tab_theme.muted, shortcut))
   else
     if agent_color and icon ~= "" then
       add(items, colored(agent_color, icon))
-      add(items, { Text = label .. branch .. gap .. shortcut })
+      add(items, { Text = label .. branch })
     else
-      add(items, { Text = icon .. label .. branch .. gap .. shortcut })
+      add(items, { Text = icon .. label .. branch })
     end
   end
-  add(items, { Text = " " })
+  add(items, { Text = gap })
+  if shortcut ~= "" then
+    add(items, colored(tab_theme.fg, shortcut))
+  end
+  add(items, { Text = right_padding })
   return items
 end)
 
