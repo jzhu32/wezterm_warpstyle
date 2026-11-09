@@ -136,9 +136,12 @@ bring it back into the strip to keep reordering. Once the pointer leaves the
 source window, any visible part of another WezTerm window becomes a magnetic
 join target. Outside the source window, a native floating preview keeps the
 tab's title, icon, size, colors and grab point under the pointer in every
-direction. The same tab previews at the end of a destination window's tab bar,
-and the alias cursor confirms the join before release. The command palette also
-has **Move this tab to a new window**.
+direction. The handoff happens when the tab edge crosses the window edge, so it
+does not clamp and jump while the pointer catches up. The preview is prepared
+once per drag and moved without a full redraw for smoother tracking. The same
+tab previews at the end of a destination window's tab bar, and the alias cursor
+confirms the join before release. The command palette also has **Move this tab
+to a new window**.
 
 The app is built and signed locally, without an Apple notarization certificate.
 Source, compiled files and app backups stay in the ignored `.build/` folder;
